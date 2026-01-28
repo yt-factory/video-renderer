@@ -1,1 +1,4 @@
 node_modules/
+
+# Claude context files (auto-generated)
+**/CLAUDE.md
