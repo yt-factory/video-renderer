@@ -139,6 +139,18 @@ async function render(options: RenderOptions): Promise<void> {
       totalGapTime: `${audioTimeline.pacingStats.totalGapSeconds.toFixed(2)}s`,
       averageGap: `${audioTimeline.pacingStats.averageGapSeconds.toFixed(2)}s`,
     });
+
+    // Log retention optimization stats if available
+    if (audioTimeline.retentionStats) {
+      logger.info('Retention optimization stats', {
+        projectId: project_id,
+        openingZoneAvgGap: `${audioTimeline.retentionStats.openingZoneGapAvg.toFixed(2)}s`,
+        middleZoneAvgGap: `${audioTimeline.retentionStats.middleZoneGapAvg.toFixed(2)}s`,
+        endingZoneAvgGap: `${audioTimeline.retentionStats.endingZoneGapAvg.toFixed(2)}s`,
+        patternInterrupts: audioTimeline.retentionStats.patternInterruptCount.toString(),
+        videoMultiplier: audioTimeline.retentionStats.videoLevelMultiplier.toFixed(2),
+      });
+    }
   }
 
   // Step 5: Render main video
@@ -253,6 +265,17 @@ async function render(options: RenderOptions): Promise<void> {
     estimated_time_seconds: estimatedTime,
     efficiency: (estimatedTime / renderTimeSeconds).toFixed(2),
     pacing_stats: audioTimeline?.pacingStats,
+    // Retention optimization stats
+    retention_stats: audioTimeline?.retentionStats
+      ? {
+          opening_zone_avg_gap: audioTimeline.retentionStats.openingZoneGapAvg,
+          middle_zone_avg_gap: audioTimeline.retentionStats.middleZoneGapAvg,
+          ending_zone_avg_gap: audioTimeline.retentionStats.endingZoneGapAvg,
+          pattern_interrupt_count: audioTimeline.retentionStats.patternInterruptCount,
+          video_level_multiplier: audioTimeline.retentionStats.videoLevelMultiplier,
+          completion_rate_distribution: audioTimeline.retentionStats.completionRateDistribution,
+        }
+      : undefined,
     outputs: {
       main_video: mainVideoPath,
       shorts: shortsOutputs.length,

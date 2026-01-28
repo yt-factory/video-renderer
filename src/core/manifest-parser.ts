@@ -67,6 +67,36 @@ export const ShortsExtractionSchema = z.object({
   face_detection_hint: z.boolean().default(false),
 });
 
+// ============================================
+// Monetization Schema (synced with orchestrator)
+// ============================================
+
+export const AdSuitabilityLevelSchema = z.enum([
+  'full_monetization',      // Green: All ads allowed
+  'limited_monetization',   // Yellow: Some ads limited
+  'no_monetization',        // Red: No ads
+  'manual_review',          // Under review
+]);
+
+export const MonetizationInfoSchema = z.object({
+  /** Ad suitability score (0-100, higher = more ad-friendly) */
+  ad_suitability_score: z.number().min(0).max(100),
+  /** Ad suitability level determined by content analysis */
+  ad_suitability_level: AdSuitabilityLevelSchema,
+  /** Estimated CPM range [min, max] in USD */
+  estimated_cpm_range: z.tuple([z.number().nonnegative(), z.number().nonnegative()]),
+  /** Regions where monetization is safe */
+  safe_regions: z.array(z.string()),
+  /** Regions where content may be blocked/demonetized */
+  blocked_regions: z.array(z.string()),
+  /** Content flags that may affect monetization */
+  content_flags: z.array(z.string()).optional(),
+  /** Recommended ad categories for targeting */
+  recommended_ad_categories: z.array(z.string()).optional(),
+  /** Brand safety score (0-100) */
+  brand_safety_score: z.number().min(0).max(100).optional(),
+});
+
 export const SEODataSchema = z.object({
   primary_language: z.enum(['en', 'zh']),
   tags: z.array(z.string()).max(30),
@@ -126,6 +156,8 @@ export const ProjectManifestSchema = z.object({
     estimated_reading_time_minutes: z.number().positive(),
   }),
   content_engine: ContentEngineSchema,
+  /** Monetization analysis from orchestrator (optional) */
+  monetization: MonetizationInfoSchema.optional(),
   assets: z
     .object({
       audio_url: z.string().url().optional(),
@@ -147,3 +179,5 @@ export type ContentEngine = z.infer<typeof ContentEngineSchema>;
 export type EmotionalTrigger = z.infer<typeof EmotionalTriggerSchema>;
 export type VoicePersona = z.infer<typeof VoicePersonaSchema>;
 export type SEOData = z.infer<typeof SEODataSchema>;
+export type MonetizationInfo = z.infer<typeof MonetizationInfoSchema>;
+export type AdSuitabilityLevel = z.infer<typeof AdSuitabilityLevelSchema>;
