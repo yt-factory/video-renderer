@@ -16,6 +16,7 @@
     "docker:render": "docker run -v $(pwd):/workspace video-renderer"
   },
   "dependencies": {
+    "@google-cloud/text-to-speech": "^6.4.0",
     "@remotion/bundler": "^4.0.0",
     "@remotion/cli": "^4.0.0",
     "@remotion/lottie": "^4.0.0",

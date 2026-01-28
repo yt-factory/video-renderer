@@ -8,6 +8,7 @@ import {
 } from 'remotion';
 import { ThemeConfig } from '../../templates';
 import { validateKeywordConsistency } from '../../core/keyword-validator';
+import { ensureContrast, adjustForContrast } from '../../utils/contrast-checker';
 import { logger } from '../../utils/logger';
 
 interface ChapterSEOOverlayProps {
@@ -21,20 +22,62 @@ interface ChapterSEOOverlayProps {
   projectId?: string;
 }
 
-const HIGH_CONTRAST_TEXT_STYLE: React.CSSProperties = {
-  color: '#FFFFFF',
-  textShadow: `
-    3px 3px 0 #000,
-    -3px -3px 0 #000,
-    3px -3px 0 #000,
-    -3px 3px 0 #000,
-    0 0 10px rgba(0,0,0,0.9),
-    0 4px 8px rgba(0,0,0,0.8)
-  `,
-  WebkitTextStroke: '1px rgba(0,0,0,0.3)',
-};
-
 const HIGH_CONTRAST_BACKGROUND = 'rgba(0, 0, 0, 0.88)';
+// Approximate the overlay background as near-black for contrast checks
+const BACKGROUND_HEX_APPROX = '#1a1a1a';
+
+/**
+ * Build a high-contrast text style, dynamically adjusting stroke and glow
+ * based on actual contrast between the theme primary color and the background.
+ */
+function buildHighContrastStyle(
+  themePrimary: string
+): { style: React.CSSProperties; useFallback: boolean } {
+  const contrastResult = ensureContrast(themePrimary, BACKGROUND_HEX_APPROX, 'AAA');
+
+  if (contrastResult.passes) {
+    // Theme primary has sufficient contrast — use it with standard stroke
+    return {
+      useFallback: false,
+      style: {
+        color: '#FFFFFF',
+        textShadow: `
+          3px 3px 0 #000,
+          -3px -3px 0 #000,
+          3px -3px 0 #000,
+          -3px 3px 0 #000,
+          0 0 10px rgba(0,0,0,0.9),
+          0 4px 8px rgba(0,0,0,0.8)
+        `,
+        WebkitTextStroke: '1px rgba(0,0,0,0.3)',
+      },
+    };
+  }
+
+  // Insufficient contrast — force high-contrast fallback with heavier stroke/glow
+  logger.debug('Theme primary has low contrast, using enhanced fallback', {
+    primary: themePrimary,
+    ratio: contrastResult.ratio.toString(),
+    required: contrastResult.required.toString(),
+  });
+
+  return {
+    useFallback: true,
+    style: {
+      color: '#FFFFFF',
+      textShadow: `
+        4px 4px 0 #000,
+        -4px -4px 0 #000,
+        4px -4px 0 #000,
+        -4px 4px 0 #000,
+        0 0 20px rgba(0,0,0,1),
+        0 0 40px rgba(0,0,0,0.8),
+        0 6px 12px rgba(0,0,0,0.9)
+      `,
+      WebkitTextStroke: '2px #000000',
+    },
+  };
+}
 
 export const ChapterSEOOverlay: React.FC<ChapterSEOOverlayProps> = ({
   keyword,
@@ -50,6 +93,18 @@ export const ChapterSEOOverlay: React.FC<ChapterSEOOverlayProps> = ({
   const { fps } = useVideoConfig();
 
   const duration = displayDurationFrames ?? fps * 2.5;
+
+  // Dynamic contrast-aware style
+  const { style: highContrastStyle, useFallback } = React.useMemo(
+    () => buildHighContrastStyle(theme.colors.primary),
+    [theme.colors.primary]
+  );
+
+  // Compute a contrast-safe accent color for the chapter number and glow
+  const safeAccentColor = React.useMemo(
+    () => adjustForContrast(theme.colors.primary, BACKGROUND_HEX_APPROX, 7),
+    [theme.colors.primary]
+  );
 
   // Triple-index validation
   React.useEffect(() => {
@@ -95,6 +150,10 @@ export const ChapterSEOOverlay: React.FC<ChapterSEOOverlayProps> = ({
 
   const lineWidth = interpolate(enterProgress, [0, 1], [0, 250]);
 
+  // Glow intensity is boosted when fallback is active to compensate
+  const glowSpread = useFallback ? 50 : 30;
+  const glowOpacity = useFallback ? '90' : '60';
+
   return (
     <AbsoluteFill
       style={{
@@ -115,11 +174,12 @@ export const ChapterSEOOverlay: React.FC<ChapterSEOOverlayProps> = ({
             fontFamily: theme.fonts.body,
             fontSize: 24,
             fontWeight: 600,
-            color: theme.colors.primary,
             letterSpacing: 6,
             textTransform: 'uppercase',
             opacity: enterProgress,
-            ...HIGH_CONTRAST_TEXT_STYLE,
+            ...highContrastStyle,
+            // Override color with contrast-safe accent for chapter label
+            color: safeAccentColor,
           }}
         >
           CHAPTER {chapterNumber}
@@ -137,8 +197,8 @@ export const ChapterSEOOverlay: React.FC<ChapterSEOOverlayProps> = ({
           transform: `scale(${keywordScale}) translateY(${keywordY}px)`,
           maxWidth: '85%',
           lineHeight: 1.1,
-          ...HIGH_CONTRAST_TEXT_STYLE,
-          filter: `drop-shadow(0 0 30px ${theme.colors.primary}60)`,
+          ...highContrastStyle,
+          filter: `drop-shadow(0 0 ${glowSpread}px ${safeAccentColor}${glowOpacity})`,
         }}
       >
         {keyword}
@@ -154,7 +214,7 @@ export const ChapterSEOOverlay: React.FC<ChapterSEOOverlayProps> = ({
           transform: `translateY(${titleY}px)`,
           opacity: titleOpacity,
           maxWidth: '75%',
-          ...HIGH_CONTRAST_TEXT_STYLE,
+          ...highContrastStyle,
         }}
       >
         {chapterTitle}
@@ -168,8 +228,8 @@ export const ChapterSEOOverlay: React.FC<ChapterSEOOverlayProps> = ({
           height: 4,
           background: `linear-gradient(90deg,
             transparent 0%,
-            ${theme.colors.primary} 20%,
-            ${theme.colors.primary} 80%,
+            ${safeAccentColor} 20%,
+            ${safeAccentColor} 80%,
             transparent 100%)`,
           borderRadius: 2,
         }}
