@@ -1,0 +1,44 @@
+{
+  "name": "video-renderer",
+  "version": "1.0.0",
+  "description": "YT-Factory Video Renderer - JSON script to high-quality video",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "remotion studio",
+    "preview": "npm run render:draft && npm run open:preview",
+    "open:preview": "open ./output/*_main.mp4 || xdg-open ./output/*_main.mp4",
+    "render:draft": "ts-node src/index.ts ./test-manifest.json ./output --profile=draft --auto-preview",
+    "render:preview": "ts-node src/index.ts ./test-manifest.json ./output --profile=preview",
+    "render:prod": "ts-node src/index.ts ./test-manifest.json ./output --profile=production",
+    "render:4k": "ts-node src/index.ts ./test-manifest.json ./output --profile=4k",
+    "build": "tsc",
+    "docker:build": "docker build -t video-renderer ./docker",
+    "docker:render": "docker run -v $(pwd):/workspace video-renderer"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.0",
+    "@remotion/cli": "^4.0.0",
+    "@remotion/lottie": "^4.0.0",
+    "@remotion/media-utils": "^4.0.410",
+    "@remotion/player": "^4.0.0",
+    "@remotion/renderer": "^4.0.0",
+    "dotenv": "^16.3.0",
+    "fluent-ffmpeg": "^2.1.0",
+    "framer-motion": "^11.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "remotion": "^4.0.0",
+    "sharp": "^0.33.0",
+    "uuid": "^9.0.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/uuid": "^9.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  }
+}
