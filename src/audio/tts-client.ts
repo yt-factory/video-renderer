@@ -103,13 +103,12 @@ export class TTSClient {
     voice: VoicePersona,
     outputPath: string
   ): Promise<SynthesizeResult> {
-    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      logger.warn('GOOGLE_APPLICATION_CREDENTIALS not set, using placeholder audio');
-      return this.generatePlaceholder(text, outputPath);
-    }
-
     try {
       const tts = await import('@google-cloud/text-to-speech');
+      // TextToSpeechClient automatically uses Application Default Credentials (ADC):
+      // 1. GOOGLE_APPLICATION_CREDENTIALS env var (if set)
+      // 2. Default service account (when running on GCP)
+      // 3. User credentials from `gcloud auth application-default login`
       const client = new tts.TextToSpeechClient();
 
       const languageCodeMap: Record<string, string> = {
@@ -164,7 +163,24 @@ export class TTSClient {
 
       return { audioPath: outputPath, durationSeconds };
     } catch (error) {
-      logger.error('Google TTS synthesis failed', { error: String(error) });
+      const errorMessage = String(error);
+      // Provide helpful guidance for common ADC authentication issues
+      if (
+        errorMessage.includes('Could not load the default credentials') ||
+        errorMessage.includes('UNAUTHENTICATED') ||
+        errorMessage.includes('Unable to detect a Project Id')
+      ) {
+        logger.error('Google TTS authentication failed. Configure ADC using one of:', {
+          error: errorMessage,
+          options: [
+            '1. Set GOOGLE_APPLICATION_CREDENTIALS env var to service account JSON path',
+            '2. Run: gcloud auth application-default login',
+            '3. Deploy on GCP with appropriate service account',
+          ],
+        });
+      } else {
+        logger.error('Google TTS synthesis failed', { error: errorMessage });
+      }
       return this.generatePlaceholder(text, outputPath);
     }
   }
