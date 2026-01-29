@@ -7,7 +7,8 @@ export const RemotionRoot: React.FC = () => {
     <>
       <Composition
         id="MainVideo"
-        component={MainVideo}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        component={MainVideo as any}
         durationInFrames={30 * 120}
         fps={30}
         width={1920}
@@ -15,11 +16,12 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{
           manifest: null,
           renderMeta: null,
-        } as MainVideoProps}
+        } satisfies MainVideoProps}
       />
       <Composition
         id="ShortsVideo"
-        component={MainVideo}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        component={MainVideo as any}
         durationInFrames={30 * 60}
         fps={30}
         width={1080}
@@ -27,7 +29,7 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{
           manifest: null,
           renderMeta: null,
-        } as MainVideoProps}
+        } satisfies MainVideoProps}
       />
     </>
   );
