@@ -14,44 +14,40 @@ export interface RenderMeta {
   pipelineVersion: string;
 }
 
+// Segment from orchestrator manifest
+export interface Segment {
+  timestamp: string;                    // "00:00" format
+  voiceover: string;                    // Actual content text
+  visual_hint: string;                  // "text_animation" | "b-roll" | "diagram" etc
+  estimated_duration_seconds: number;   // Duration in seconds
+  emotional_trigger?: string;
+  emphasis_words?: string[];
+}
+
+// Regional SEO data
+export interface RegionalSEO {
+  language: string;
+  titles: string[];
+  description: string;
+}
+
 // Manifest type (from orchestrator)
 export interface Manifest {
   project_id?: string;
-  seo?: {
-    title: string;
-    description: string;
-    chapters?: string;
-    tags?: string[];
-  };
-  script?: {
-    segments: Segment[];
-  };
   content_engine?: {
     script: Segment[];
     seo: {
-      title?: string;
-      description?: string;
+      primary_language: string;
+      regional_seo: RegionalSEO[];
       chapters?: string;
       tags?: string[];
     };
+    estimated_duration_seconds?: number;
   };
-  voice?: {
-    provider: string;
-    name: string;
+  // Legacy fallback fields
+  seo?: {
+    title?: string;
   };
-}
-
-export interface Segment {
-  id?: string;
-  timestamp?: string;
-  voiceover: string;
-  visual_hint?: string;
-  startTime?: number;
-  endTime?: number;
-  estimated_duration_seconds?: number;
-  emotion?: string;
-  emotional_trigger?: string;
-  emphasis_words?: string[];
 }
 
 export interface MainVideoProps {
@@ -192,69 +188,159 @@ const MainContent: React.FC<{ manifest: Manifest }> = ({ manifest }) => {
   const { fps } = useVideoConfig();
 
   // Get segments from manifest
-  const segments = manifest.content_engine?.script || manifest.script?.segments || [];
-  const title = manifest.content_engine?.seo?.title || manifest.seo?.title || "Untitled Video";
+  const segments = manifest.content_engine?.script || [];
 
-  // Title entrance animation
-  const titleOpacity = interpolate(frame, [0, fps * 0.5], [0, 1], {
-    extrapolateRight: "clamp",
+  // Get title - prefer Chinese, fallback to English, then default
+  const regionalSeo = manifest.content_engine?.seo?.regional_seo || [];
+  const zhSeo = regionalSeo.find(r => r.language === "zh");
+  const enSeo = regionalSeo.find(r => r.language === "en");
+  const title = zhSeo?.titles?.[0] || enSeo?.titles?.[0] || manifest.seo?.title || "极客禅公案";
+
+  // Calculate segment frame ranges based on estimated_duration_seconds
+  let accumulatedFrames = 0;
+  const segmentRanges = segments.map((seg) => {
+    const startFrame = accumulatedFrames;
+    const durationFrames = (seg.estimated_duration_seconds || 5) * fps;
+    accumulatedFrames += durationFrames;
+    return {
+      segment: seg,
+      startFrame,
+      endFrame: startFrame + durationFrames,
+      durationFrames,
+    };
   });
-  const titleY = interpolate(frame, [0, fps * 0.5], [30, 0], {
+
+  // Find current segment based on frame
+  const currentSegmentData = segmentRanges.find(
+    ({ startFrame, endFrame }) => frame >= startFrame && frame < endFrame
+  );
+
+  const currentSegment = currentSegmentData?.segment;
+  const segmentProgress = currentSegmentData
+    ? (frame - currentSegmentData.startFrame) / currentSegmentData.durationFrames
+    : 0;
+
+  // Text fade in/out animation
+  const textOpacity = interpolate(
+    segmentProgress,
+    [0, 0.08, 0.92, 1],
+    [0, 1, 1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+
+  // Title entrance animation (first 1 second)
+  const titleOpacity = interpolate(frame, [0, fps * 0.5], [0, 1], {
     extrapolateRight: "clamp",
   });
 
   return (
     <AbsoluteFill
       style={{
-        justifyContent: "center",
-        alignItems: "center",
-        padding: 80,
+        backgroundColor: "#0a0a0f",
+        fontFamily: "system-ui, -apple-system, sans-serif",
       }}
     >
-      {/* Video title */}
-      <h1
-        style={{
-          color: "#fff",
-          fontSize: 56,
-          fontWeight: 700,
-          textAlign: "center",
-          fontFamily: "system-ui, sans-serif",
-          textShadow: "0 4px 20px rgba(0,217,255,0.3)",
-          opacity: titleOpacity,
-          transform: `translateY(${titleY}px)`,
-          maxWidth: "80%",
-        }}
-      >
-        {title}
-      </h1>
-
-      {/* Segment count indicator */}
-      {segments.length > 0 && (
-        <div
-          style={{
-            marginTop: 40,
-            color: "#666",
-            fontSize: 18,
-            fontFamily: "system-ui, sans-serif",
-          }}
-        >
-          {segments.length} segments ready to render
-        </div>
-      )}
-
-      {/* Animated accent line */}
+      {/* Top title bar */}
       <div
         style={{
           position: "absolute",
-          bottom: "20%",
-          width: interpolate(frame, [fps * 0.3, fps], [0, 300], {
-            extrapolateRight: "clamp",
-          }),
-          height: 3,
-          background: "linear-gradient(90deg, transparent, #00d9ff, transparent)",
-          borderRadius: 2,
+          top: 50,
+          left: 0,
+          right: 0,
+          textAlign: "center",
+          opacity: titleOpacity,
         }}
-      />
+      >
+        <h1
+          style={{
+            color: "#00d9ff",
+            fontSize: 36,
+            fontWeight: 600,
+            margin: 0,
+            textShadow: "0 2px 10px rgba(0,217,255,0.3)",
+          }}
+        >
+          {title.length > 40 ? title.substring(0, 40) + "..." : title}
+        </h1>
+      </div>
+
+      {/* Current segment voiceover text */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100%",
+          padding: "0 100px",
+        }}
+      >
+        <p
+          style={{
+            color: "#ffffff",
+            fontSize: 44,
+            fontWeight: 500,
+            textAlign: "center",
+            lineHeight: 1.6,
+            opacity: textOpacity,
+            maxWidth: "85%",
+            textShadow: "0 2px 8px rgba(0,0,0,0.5)",
+          }}
+        >
+          {currentSegment?.voiceover || ""}
+        </p>
+      </div>
+
+      {/* Bottom info bar */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 50,
+          left: 0,
+          right: 0,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: 30,
+        }}
+      >
+        <span style={{ color: "#666", fontSize: 16 }}>
+          {currentSegment?.timestamp || "00:00"}
+        </span>
+        <span
+          style={{
+            color: "#00d9ff",
+            fontSize: 14,
+            padding: "4px 12px",
+            background: "rgba(0,217,255,0.1)",
+            borderRadius: 4,
+          }}
+        >
+          {currentSegment?.visual_hint || "loading"}
+        </span>
+        <span style={{ color: "#444", fontSize: 14 }}>
+          {segmentRanges.findIndex(s => s.segment === currentSegment) + 1} / {segments.length}
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 3,
+          background: "rgba(255,255,255,0.1)",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${(frame / (accumulatedFrames || 1)) * 100}%`,
+            background: "linear-gradient(90deg, #00d9ff, #00ffaa)",
+          }}
+        />
+      </div>
     </AbsoluteFill>
   );
 };

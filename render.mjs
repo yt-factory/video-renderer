@@ -140,7 +140,11 @@ Options (via environment variables):
   const outputPath = path.join(outputDir, "video.mp4");
 
   log("🎥", "Starting render...");
-  log("   ", `Title: ${manifest.content_engine?.seo?.title || manifest.seo?.title || "Untitled"}`);
+  const videoTitle = manifest.content_engine?.seo?.regional_seo?.find(r => r.language === "zh")?.titles?.[0]
+    || manifest.content_engine?.seo?.regional_seo?.[0]?.titles?.[0]
+    || manifest.seo?.title
+    || "Untitled";
+  log("   ", `Title: ${videoTitle}`);
   log("   ", `Output: ${outputPath}`);
 
   // =============================================================================
