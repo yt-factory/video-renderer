@@ -1,16 +1,17 @@
 {
   "name": "video-renderer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "YT-Factory Video Renderer - JSON script to high-quality video",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "dev": "remotion studio",
     "preview": "npm run render:draft && npm run open:preview",
-    "open:preview": "open ./output/*_main.mp4 || xdg-open ./output/*_main.mp4",
-    "render:draft": "ts-node src/index.ts ./test-manifest.json ./output --profile=draft --auto-preview",
-    "render:preview": "ts-node src/index.ts ./test-manifest.json ./output --profile=preview",
-    "render:prod": "ts-node src/index.ts ./test-manifest.json ./output --profile=production",
-    "render:4k": "ts-node src/index.ts ./test-manifest.json ./output --profile=4k",
+    "open:preview": "open ./output/*/video.mp4 || xdg-open ./output/*/video.mp4 2>/dev/null || echo 'No video found'",
+    "render": "node render.mjs",
+    "render:draft": "RENDER_PROFILE=draft node render.mjs",
+    "render:preview": "RENDER_PROFILE=preview node render.mjs",
+    "render:prod": "RENDER_PROFILE=production node render.mjs",
     "build": "tsc",
     "docker:build": "docker build -t video-renderer ./docker",
     "docker:render": "docker run -v $(pwd):/workspace video-renderer"

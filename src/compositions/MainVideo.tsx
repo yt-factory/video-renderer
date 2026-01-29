@@ -1,125 +1,278 @@
-import React from 'react';
-import { AbsoluteFill, Audio, Sequence, useVideoConfig } from 'remotion';
-import { ScriptSegment } from '../core/manifest-parser';
-import { ThemeConfig } from '../templates';
-import { AudioTimeline } from '../audio/audio-sync';
-import { EmotionalTransition } from '../components/transitions/EmotionalTransition';
-import { ChapterSEOOverlay, extractChapterKeywords } from '../components/overlays/ChapterSEOOverlay';
-import { SmartSubtitle, generateWordTimeline } from '../components/overlays/SmartSubtitle';
+import React from "react";
+import {
+  AbsoluteFill,
+  useCurrentFrame,
+  useVideoConfig,
+  interpolate,
+  Sequence,
+} from "remotion";
 
-export interface MainVideoProps {
-  script: ScriptSegment[];
-  audioPath: string;
-  audioTimeline?: AudioTimeline;
-  chapters: string;
-  seoTags: string[];
-  theme: ThemeConfig;
+// Render metadata for tracing
+export interface RenderMeta {
+  traceId: string;
+  renderedAt: string;
+  pipelineVersion: string;
 }
 
-export const MainVideo: React.FC<MainVideoProps> = ({
-  script,
-  audioPath,
-  audioTimeline,
-  chapters,
-  seoTags,
-  theme,
-}) => {
-  const { fps } = useVideoConfig();
+// Manifest type (from orchestrator)
+export interface Manifest {
+  project_id?: string;
+  seo?: {
+    title: string;
+    description: string;
+    chapters?: string;
+    tags?: string[];
+  };
+  script?: {
+    segments: Segment[];
+  };
+  content_engine?: {
+    script: Segment[];
+    seo: {
+      title?: string;
+      description?: string;
+      chapters?: string;
+      tags?: string[];
+    };
+  };
+  voice?: {
+    provider: string;
+    name: string;
+  };
+}
 
-  const chapterKeywords = extractChapterKeywords(chapters, seoTags);
+export interface Segment {
+  id?: string;
+  timestamp?: string;
+  voiceover: string;
+  visual_hint?: string;
+  startTime?: number;
+  endTime?: number;
+  estimated_duration_seconds?: number;
+  emotion?: string;
+  emotional_trigger?: string;
+  emphasis_words?: string[];
+}
+
+export interface MainVideoProps {
+  manifest: Manifest | null;
+  renderMeta: RenderMeta | null;
+}
+
+const BUFFER_FRAMES = 30; // 1 second buffer for fade in/out
+
+export const MainVideo: React.FC<MainVideoProps> = ({ manifest, renderMeta }) => {
+  const { durationInFrames } = useVideoConfig();
+
+  // Studio preview mode - no manifest provided
+  if (!manifest) {
+    return <PreviewPlaceholder />;
+  }
+
+  const contentDuration = durationInFrames - BUFFER_FRAMES * 2;
 
   return (
-    <AbsoluteFill style={{ backgroundColor: theme.colors.background }}>
-      {/* Audio track */}
-      <Audio src={audioPath} />
+    <AbsoluteFill style={{ backgroundColor: "#0a0a0f" }}>
+      {/* Opening fade in */}
+      <Sequence from={0} durationInFrames={BUFFER_FRAMES}>
+        <FadeIn />
+      </Sequence>
 
-      {/* Render each script segment */}
-      {script.map((segment, index) => {
-        const timing = audioTimeline?.segments[index];
-        const startFrame = timing?.startFrame ?? Math.round(index * fps * segment.estimated_duration_seconds);
-        const durationFrames = timing?.durationFrames ?? Math.round(segment.estimated_duration_seconds * fps);
+      {/* Main content */}
+      <Sequence from={BUFFER_FRAMES} durationInFrames={contentDuration}>
+        <MainContent manifest={manifest} />
+      </Sequence>
 
-        // Find matching chapter keyword
-        const chapterKeyword = chapterKeywords.find((ck) => ck.timestamp === segment.timestamp);
+      {/* Closing fade out */}
+      <Sequence
+        from={BUFFER_FRAMES + contentDuration}
+        durationInFrames={BUFFER_FRAMES}
+      >
+        <FadeOut />
+      </Sequence>
 
-        return (
-          <Sequence key={index} from={startFrame} durationInFrames={durationFrames}>
-            {/* Emotional transition wrapper */}
-            {segment.emotional_trigger ? (
-              <EmotionalTransition emotion={segment.emotional_trigger} seed={`seg-${index}`}>
-                <SegmentContent segment={segment} theme={theme} />
-              </EmotionalTransition>
-            ) : (
-              <SegmentContent segment={segment} theme={theme} />
-            )}
-
-            {/* Chapter SEO overlay at chapter starts */}
-            {chapterKeyword && (
-              <ChapterSEOOverlay
-                keyword={chapterKeyword.keyword}
-                chapterTitle={chapterKeyword.title}
-                chapterNumber={chapterKeywords.indexOf(chapterKeyword) + 1}
-                theme={theme}
-                seoTags={seoTags}
-              />
-            )}
-
-            {/* Smart subtitles */}
-            <SmartSubtitle
-              words={generateWordTimeline(
-                segment.voiceover,
-                0,
-                segment.estimated_duration_seconds,
-                segment.emphasis_words,
-                seoTags.slice(0, 5)
-              )}
-              theme={theme}
-              style={theme.components.subtitleStyle}
-            />
-          </Sequence>
-        );
-      })}
+      {/* Render metadata watermark (only in production renders) */}
+      {renderMeta && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 10,
+            right: 10,
+            fontSize: 10,
+            color: "rgba(255,255,255,0.2)",
+            fontFamily: "monospace",
+          }}
+        >
+          {renderMeta.traceId}
+        </div>
+      )}
     </AbsoluteFill>
   );
 };
 
-const SegmentContent: React.FC<{ segment: ScriptSegment; theme: ThemeConfig }> = ({
-  segment,
-  theme,
-}) => {
+// Preview placeholder for Remotion Studio
+const PreviewPlaceholder: React.FC = () => {
+  const frame = useCurrentFrame();
+  // Breathing animation
+  const breathing = Math.sin(frame / 30) * 0.1 + 0.9;
+
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: theme.colors.background,
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
+        backgroundColor: "#0a0a0f",
+        justifyContent: "center",
+        alignItems: "center",
+        fontFamily: "system-ui, sans-serif",
       }}
     >
-      {/* Placeholder visual based on hint */}
-      <div
-        style={{
-          fontFamily: theme.fonts.body,
-          fontSize: 24,
-          color: theme.colors.text,
-          textAlign: 'center',
-          padding: 40,
-        }}
-      >
-        {segment.visual_hint === 'text_animation' && segment.voiceover}
-        {segment.visual_hint === 'code_block' && (
-          <pre
-            style={{
-              fontFamily: theme.fonts.code,
-              background: theme.colors.background,
-              padding: 20,
-              borderRadius: 8,
-            }}
-          >
-            {segment.voiceover}
-          </pre>
-        )}
+      <div style={{ textAlign: "center", opacity: breathing }}>
+        <h1 style={{ color: "#00d9ff", fontSize: 72, margin: 0 }}>极客禅</h1>
+        <p style={{ color: "#666", fontSize: 28, marginTop: 20 }}>
+          YT-Factory Video Renderer
+        </p>
+        <p style={{ color: "#444", fontSize: 16, marginTop: 40 }}>
+          Waiting for manifest...
+        </p>
+        <div
+          style={{
+            marginTop: 60,
+            display: "flex",
+            gap: 20,
+            justifyContent: "center",
+          }}
+        >
+          <StatusBadge label="Remotion" status="ready" />
+          <StatusBadge label="Manifest" status="waiting" />
+          <StatusBadge label="Audio" status="waiting" />
+        </div>
       </div>
     </AbsoluteFill>
   );
+};
+
+// Status badge component
+const StatusBadge: React.FC<{
+  label: string;
+  status: "ready" | "waiting" | "error";
+}> = ({ label, status }) => {
+  const colors = {
+    ready: "#00ff88",
+    waiting: "#ffaa00",
+    error: "#ff4444",
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 16px",
+        background: "rgba(255,255,255,0.05)",
+        borderRadius: 20,
+        border: `1px solid ${colors[status]}40`,
+      }}
+    >
+      <div
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          backgroundColor: colors[status],
+        }}
+      />
+      <span style={{ color: "#888", fontSize: 14 }}>{label}</span>
+    </div>
+  );
+};
+
+// Main content renderer
+const MainContent: React.FC<{ manifest: Manifest }> = ({ manifest }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+
+  // Get segments from manifest
+  const segments = manifest.content_engine?.script || manifest.script?.segments || [];
+  const title = manifest.content_engine?.seo?.title || manifest.seo?.title || "Untitled Video";
+
+  // Title entrance animation
+  const titleOpacity = interpolate(frame, [0, fps * 0.5], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  const titleY = interpolate(frame, [0, fps * 0.5], [30, 0], {
+    extrapolateRight: "clamp",
+  });
+
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 80,
+      }}
+    >
+      {/* Video title */}
+      <h1
+        style={{
+          color: "#fff",
+          fontSize: 56,
+          fontWeight: 700,
+          textAlign: "center",
+          fontFamily: "system-ui, sans-serif",
+          textShadow: "0 4px 20px rgba(0,217,255,0.3)",
+          opacity: titleOpacity,
+          transform: `translateY(${titleY}px)`,
+          maxWidth: "80%",
+        }}
+      >
+        {title}
+      </h1>
+
+      {/* Segment count indicator */}
+      {segments.length > 0 && (
+        <div
+          style={{
+            marginTop: 40,
+            color: "#666",
+            fontSize: 18,
+            fontFamily: "system-ui, sans-serif",
+          }}
+        >
+          {segments.length} segments ready to render
+        </div>
+      )}
+
+      {/* Animated accent line */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: "20%",
+          width: interpolate(frame, [fps * 0.3, fps], [0, 300], {
+            extrapolateRight: "clamp",
+          }),
+          height: 3,
+          background: "linear-gradient(90deg, transparent, #00d9ff, transparent)",
+          borderRadius: 2,
+        }}
+      />
+    </AbsoluteFill>
+  );
+};
+
+// Fade in overlay
+const FadeIn: React.FC = () => {
+  const frame = useCurrentFrame();
+  const opacity = interpolate(frame, [0, BUFFER_FRAMES], [1, 0], {
+    extrapolateRight: "clamp",
+  });
+  return <AbsoluteFill style={{ backgroundColor: "#000", opacity }} />;
+};
+
+// Fade out overlay
+const FadeOut: React.FC = () => {
+  const frame = useCurrentFrame();
+  const opacity = interpolate(frame, [0, BUFFER_FRAMES], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  return <AbsoluteFill style={{ backgroundColor: "#000", opacity }} />;
 };
