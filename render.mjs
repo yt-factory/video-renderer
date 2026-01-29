@@ -22,6 +22,7 @@ import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 
@@ -149,12 +150,14 @@ Options (via environment variables):
   const renderStart = Date.now();
 
   const profile = process.env.RENDER_PROFILE || "preview";
+  const cpuCount = os.cpus().length;
   const profiles = {
-    draft: { crf: 35, concurrency: 8 },
-    preview: { crf: 28, concurrency: 4 },
-    production: { crf: 18, concurrency: 2 },
+    draft: { crf: 35, concurrency: Math.min(8, cpuCount) },
+    preview: { crf: 28, concurrency: Math.min(4, cpuCount) },
+    production: { crf: 18, concurrency: Math.min(2, cpuCount) },
   };
   const { crf, concurrency } = profiles[profile] || profiles.preview;
+  log("⚙️", `Using ${concurrency} threads (${cpuCount} cores available)`);
 
   await renderMedia({
     composition,
