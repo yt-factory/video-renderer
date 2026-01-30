@@ -7,19 +7,22 @@
  * mixing Node.js APIs (fs, path, child_process) with browser code.
  *
  * Usage:
- *   node render.mjs <project-id>
- *   node render.mjs e8100583-a024-40b2-a228-d0c577fc27db
+ *   node render.mjs <project-id> [--lang=en|zh]
+ *   node render.mjs e8100583-a024-40b2-a228-d0c577fc27db --lang=en
  *
  * The script:
  * 1. Reads manifest from orchestrator output
- * 2. Bundles Remotion project (pure React)
- * 3. Renders video with inputProps
- * 4. Validates output (Glitch protection)
- * 5. Writes render report
+ * 2. Reads external audio file (NotebookLM generated)
+ * 3. Calculates video duration from audio duration
+ * 4. Bundles Remotion project (pure React)
+ * 5. Renders video with inputProps
+ * 6. Validates output (Glitch protection)
+ * 7. Writes render report
  */
 
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
+import { getAudioDurationInSeconds } from "@remotion/media-utils";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -53,58 +56,139 @@ function log(emoji, message, details = "") {
 async function main() {
   const projectId = process.argv[2];
 
+  // Parse language argument
+  const langArg = process.argv.find((arg) => arg.startsWith("--lang="));
+  const lang = langArg ? langArg.replace("--lang=", "") : "en"; // Default to English
+
   if (!projectId) {
     console.log(`
 ${colors.cyan}YT-Factory Video Renderer${colors.reset}
 
-Usage: node render.mjs <project-id>
+Usage: node render.mjs <project-id> [--lang=en|zh]
 
 Examples:
   node render.mjs e8100583-a024-40b2-a228-d0c577fc27db
-  node render.mjs ./path/to/manifest.json
+  node render.mjs e8100583-a024-40b2-a228-d0c577fc27db --lang=en
+  node render.mjs e8100583-a024-40b2-a228-d0c577fc27db --lang=zh
+  node render.mjs ./path/to/manifest.json --lang=zh
 
-Options (via environment variables):
-  RENDER_PROFILE=draft|preview|production  Render quality profile
-  OUTPUT_DIR=./custom-output               Custom output directory
+Options:
+  --lang=en|zh                           Language for audio/video (default: en)
+  RENDER_PROFILE=draft|preview|production  Render quality profile (env var)
+  OUTPUT_DIR=./custom-output               Custom output directory (env var)
 `);
     process.exit(1);
   }
 
+  // =============================================================================
+  // Step 1: Determine Paths
+  // =============================================================================
+
   // Determine manifest path
   let manifestPath;
+  let projectDir;
+
   if (projectId.endsWith(".json") || projectId.startsWith("./")) {
     manifestPath = path.resolve(projectId);
+    projectDir = path.dirname(manifestPath);
   } else {
     // Look in orchestrator active_projects
-    manifestPath = path.join(
+    projectDir = path.join(
       __dirname,
       "../orchestrator/active_projects",
-      projectId,
-      "manifest.json"
+      projectId
     );
+    manifestPath = path.join(projectDir, "manifest.json");
   }
 
   if (!fs.existsSync(manifestPath)) {
-    console.error(`${colors.red}❌ Manifest not found: ${manifestPath}${colors.reset}`);
+    console.error(
+      `${colors.red}❌ Manifest not found: ${manifestPath}${colors.reset}`
+    );
     process.exit(1);
   }
+
+  // Audio path - support en.mp3 or zh.mp3
+  const audioPath = path.join(projectDir, `audio/${lang}.mp3`);
+
+  if (!fs.existsSync(audioPath)) {
+    console.error(`${colors.red}❌ Audio not found: ${audioPath}${colors.reset}`);
+    console.log("");
+    console.log(`${colors.yellow}📋 Please complete these steps first:${colors.reset}`);
+    console.log(
+      `   1. Open ${colors.cyan}${projectDir}/notebooklm_script_${lang}.md${colors.reset}`
+    );
+    console.log("   2. Copy content to NotebookLM");
+    console.log("   3. Generate Audio Overview");
+    console.log(`   4. Download MP3 and save as ${colors.cyan}${audioPath}${colors.reset}`);
+    console.log("");
+    console.log(`${colors.dim}Directory structure should be:${colors.reset}`);
+    console.log(`   ${projectDir}/`);
+    console.log(`   ├── manifest.json`);
+    console.log(`   ├── audio/`);
+    console.log(`   │   ├── en.mp3`);
+    console.log(`   │   └── zh.mp3`);
+    console.log(`   └── notebooklm_script_${lang}.md`);
+    process.exit(1);
+  }
+
+  // =============================================================================
+  // Step 2: Read Manifest and Analyze Audio
+  // =============================================================================
 
   // Read manifest
   log("📄", "Loading manifest", manifestPath);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
 
-  const actualProjectId = manifest.project_id || projectId.replace(".json", "").split("/").pop();
+  const actualProjectId =
+    manifest.project_id || projectId.replace(".json", "").split("/").pop();
   log("🆔", `Project ID: ${actualProjectId}`);
+  log("🌐", `Language: ${lang}`);
+
+  // Get audio duration
+  log("📊", "Analyzing audio...");
+  const audioDuration = await getAudioDurationInSeconds(audioPath);
+  log(
+    "   ",
+    `Audio duration: ${audioDuration.toFixed(1)}s (${(audioDuration / 60).toFixed(1)} min)`
+  );
+
+  // Calculate video frames
+  const fps = 30;
+  const BUFFER_FRAMES = 30; // 1 second buffer for fade in/out
+  const durationInFrames = Math.ceil(audioDuration * fps) + BUFFER_FRAMES * 2;
+
+  log(
+    "   ",
+    `Video frames: ${durationInFrames} (${(durationInFrames / fps / 60).toFixed(1)} min total)`
+  );
 
   // Render metadata for tracing
   const renderMeta = {
     traceId: manifest.traceId || `render-${actualProjectId}-${Date.now()}`,
     renderedAt: new Date().toISOString(),
-    pipelineVersion: "2.0.0-clean",
+    pipelineVersion: "2.1.0-notebooklm",
+    language: lang,
+    audioDuration: audioDuration,
   };
 
   // =============================================================================
-  // Step 1: Bundle Remotion Project
+  // Step 3: Copy Audio to Public Directory
+  // =============================================================================
+
+  // Remotion needs to access files from public directory
+  const publicAudioDir = path.resolve(
+    __dirname,
+    `./public/${actualProjectId}/audio`
+  );
+  fs.mkdirSync(publicAudioDir, { recursive: true });
+
+  const publicAudioPath = path.join(publicAudioDir, `${lang}.mp3`);
+  fs.copyFileSync(audioPath, publicAudioPath);
+  log("📁", "Audio copied to public directory");
+
+  // =============================================================================
+  // Step 4: Bundle Remotion Project
   // =============================================================================
 
   log("📦", "Bundling Remotion project...");
@@ -118,11 +202,19 @@ Options (via environment variables):
   log("✓", "Bundle complete", `(${((Date.now() - bundleStart) / 1000).toFixed(1)}s)`);
 
   // =============================================================================
-  // Step 2: Select Composition
+  // Step 5: Select Composition
   // =============================================================================
 
   log("🎬", "Selecting composition...");
-  const inputProps = { manifest, renderMeta };
+
+  // Prepare inputProps
+  const inputProps = {
+    manifest,
+    renderMeta,
+    lang,
+    // Audio path relative to public directory (for staticFile)
+    audioFile: `${actualProjectId}/audio/${lang}.mp3`,
+  };
 
   const composition = await selectComposition({
     serveUrl: bundleLocation,
@@ -130,25 +222,40 @@ Options (via environment variables):
     inputProps,
   });
 
+  // Override duration with calculated value from audio
+  const compositionWithDuration = {
+    ...composition,
+    durationInFrames,
+  };
+
   // =============================================================================
-  // Step 3: Prepare Output
+  // Step 6: Prepare Output
   // =============================================================================
 
-  const outputDir = process.env.OUTPUT_DIR || `./output/${actualProjectId}`;
+  // Output to language-specific directory
+  const outputDir =
+    process.env.OUTPUT_DIR || `./output/${actualProjectId}/${lang}`;
   fs.mkdirSync(outputDir, { recursive: true });
 
   const outputPath = path.join(outputDir, "video.mp4");
 
+  // Get video title
+  const regionalSeo = manifest.content_engine?.seo?.regional_seo || [];
+  const langSeo = regionalSeo.find((r) => r.language === lang);
+  const fallbackSeo = regionalSeo[0];
+  const videoTitle =
+    langSeo?.titles?.[0] ||
+    fallbackSeo?.titles?.[0] ||
+    manifest.seo?.title ||
+    "Untitled";
+
   log("🎥", "Starting render...");
-  const videoTitle = manifest.content_engine?.seo?.regional_seo?.find(r => r.language === "zh")?.titles?.[0]
-    || manifest.content_engine?.seo?.regional_seo?.[0]?.titles?.[0]
-    || manifest.seo?.title
-    || "Untitled";
   log("   ", `Title: ${videoTitle}`);
+  log("   ", `Language: ${lang}`);
   log("   ", `Output: ${outputPath}`);
 
   // =============================================================================
-  // Step 4: Render Video
+  // Step 7: Render Video
   // =============================================================================
 
   const renderStart = Date.now();
@@ -164,7 +271,7 @@ Options (via environment variables):
   log("⚙️", `Using ${concurrency} threads (${cpuCount} cores available)`);
 
   await renderMedia({
-    composition,
+    composition: compositionWithDuration,
     serveUrl: bundleLocation,
     codec: "h264",
     outputLocation: outputPath,
@@ -177,7 +284,7 @@ Options (via environment variables):
   log("✅", `Render complete in ${renderDuration}s`);
 
   // =============================================================================
-  // Step 5: Glitch Protection - Validate First/Last Frames
+  // Step 8: Glitch Protection - Validate First/Last Frames
   // =============================================================================
 
   log("🔍", "Validating output...");
@@ -202,9 +309,6 @@ Options (via environment variables):
       log("   ", "✓ First frame extracted");
       log("   ", "✓ Last frame extracted");
 
-      // Optional: Check if frames are mostly black (expected with fade in/out)
-      // This could be enhanced with sharp to analyze pixel values
-
       // Cleanup validation frames
       fs.unlinkSync(firstFrame);
       fs.unlinkSync(lastFrame);
@@ -218,32 +322,35 @@ Options (via environment variables):
   }
 
   // =============================================================================
-  // Step 6: Write Render Report
+  // Step 9: Write Render Report
   // =============================================================================
 
   const report = {
     projectId: actualProjectId,
+    language: lang,
     traceId: renderMeta.traceId,
     outputPath: path.resolve(outputPath),
     renderedAt: renderMeta.renderedAt,
     completedAt: new Date().toISOString(),
+    audioDuration: audioDuration,
+    videoDuration: durationInFrames / fps,
     renderDurationSeconds: parseFloat(renderDuration),
     profile,
     composition: {
-      id: composition.id,
-      width: composition.width,
-      height: composition.height,
-      fps: composition.fps,
-      durationInFrames: composition.durationInFrames,
+      id: compositionWithDuration.id,
+      width: compositionWithDuration.width,
+      height: compositionWithDuration.height,
+      fps: compositionWithDuration.fps,
+      durationInFrames: compositionWithDuration.durationInFrames,
     },
     manifest: {
-      title: manifest.content_engine?.seo?.title || manifest.seo?.title,
+      title: videoTitle,
       segments: manifest.content_engine?.script?.length || 0,
     },
     validation: {
       glitchProtection: true,
-      firstFrameBuffer: 30,
-      lastFrameBuffer: 30,
+      firstFrameBuffer: BUFFER_FRAMES,
+      lastFrameBuffer: BUFFER_FRAMES,
     },
   };
 
@@ -261,9 +368,12 @@ ${colors.green}═════════════════════�
 ${colors.cyan}✅ Render Complete${colors.reset}
 ${colors.dim}────────────────────────────────────────────────────────────────${colors.reset}
    Project:     ${actualProjectId}
+   Language:    ${lang}
    Trace ID:    ${renderMeta.traceId}
    Output:      ${outputPath}
-   Duration:    ${renderDuration}s
+   Audio:       ${audioDuration.toFixed(1)}s
+   Video:       ${(durationInFrames / fps).toFixed(1)}s
+   Render Time: ${renderDuration}s
    Profile:     ${profile}
 ${colors.green}════════════════════════════════════════════════════════════════${colors.reset}
 `);

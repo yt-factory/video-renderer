@@ -1,6 +1,8 @@
 import React from "react";
 import {
   AbsoluteFill,
+  Audio,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
   interpolate,
@@ -12,14 +14,16 @@ export interface RenderMeta {
   traceId: string;
   renderedAt: string;
   pipelineVersion: string;
+  language?: string;
+  audioDuration?: number;
 }
 
 // Segment from orchestrator manifest
 export interface Segment {
-  timestamp: string;                    // "00:00" format
-  voiceover: string;                    // Actual content text
-  visual_hint: string;                  // "text_animation" | "b-roll" | "diagram" etc
-  estimated_duration_seconds: number;   // Duration in seconds
+  timestamp: string; // "00:00" format
+  voiceover: string; // Actual content text
+  visual_hint: string; // "text_animation" | "b-roll" | "diagram" etc
+  estimated_duration_seconds: number; // Duration in seconds
   emotional_trigger?: string;
   emphasis_words?: string[];
 }
@@ -53,11 +57,18 @@ export interface Manifest {
 export interface MainVideoProps {
   manifest: Manifest | null;
   renderMeta: RenderMeta | null;
+  lang?: "en" | "zh";
+  audioFile?: string; // Path relative to public directory
 }
 
 const BUFFER_FRAMES = 30; // 1 second buffer for fade in/out
 
-export const MainVideo: React.FC<MainVideoProps> = ({ manifest, renderMeta }) => {
+export const MainVideo: React.FC<MainVideoProps> = ({
+  manifest,
+  renderMeta,
+  lang = "en",
+  audioFile,
+}) => {
   const { durationInFrames } = useVideoConfig();
 
   // Studio preview mode - no manifest provided
@@ -67,8 +78,25 @@ export const MainVideo: React.FC<MainVideoProps> = ({ manifest, renderMeta }) =>
 
   const contentDuration = durationInFrames - BUFFER_FRAMES * 2;
 
+  // Get title for the specified language
+  const regionalSeo = manifest.content_engine?.seo?.regional_seo || [];
+  const langSeo = regionalSeo.find((r) => r.language === lang);
+  const fallbackSeo = regionalSeo.find((r) => r.language === "en") || regionalSeo[0];
+  const title =
+    langSeo?.titles?.[0] ||
+    fallbackSeo?.titles?.[0] ||
+    manifest.seo?.title ||
+    (lang === "zh" ? "极客禅" : "Geek Zen");
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#0a0a0f" }}>
+      {/* Audio layer - plays during content (after buffer) */}
+      {audioFile && (
+        <Sequence from={BUFFER_FRAMES}>
+          <Audio src={staticFile(audioFile)} volume={1} />
+        </Sequence>
+      )}
+
       {/* Opening fade in */}
       <Sequence from={0} durationInFrames={BUFFER_FRAMES}>
         <FadeIn />
@@ -76,7 +104,7 @@ export const MainVideo: React.FC<MainVideoProps> = ({ manifest, renderMeta }) =>
 
       {/* Main content */}
       <Sequence from={BUFFER_FRAMES} durationInFrames={contentDuration}>
-        <MainContent manifest={manifest} />
+        <MainContent title={title} lang={lang} />
       </Sequence>
 
       {/* Closing fade out */}
@@ -182,51 +210,16 @@ const StatusBadge: React.FC<{
   );
 };
 
-// Main content renderer
-const MainContent: React.FC<{ manifest: Manifest }> = ({ manifest }) => {
+// Main content renderer - zen-themed for NotebookLM audio
+const MainContent: React.FC<{ title: string; lang: string }> = ({
+  title,
+  lang,
+}) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
 
-  // Get segments from manifest
-  const segments = manifest.content_engine?.script || [];
-
-  // Get title - prefer Chinese, fallback to English, then default
-  const regionalSeo = manifest.content_engine?.seo?.regional_seo || [];
-  const zhSeo = regionalSeo.find(r => r.language === "zh");
-  const enSeo = regionalSeo.find(r => r.language === "en");
-  const title = zhSeo?.titles?.[0] || enSeo?.titles?.[0] || manifest.seo?.title || "极客禅公案";
-
-  // Calculate segment frame ranges based on estimated_duration_seconds
-  let accumulatedFrames = 0;
-  const segmentRanges = segments.map((seg) => {
-    const startFrame = accumulatedFrames;
-    const durationFrames = (seg.estimated_duration_seconds || 5) * fps;
-    accumulatedFrames += durationFrames;
-    return {
-      segment: seg,
-      startFrame,
-      endFrame: startFrame + durationFrames,
-      durationFrames,
-    };
-  });
-
-  // Find current segment based on frame
-  const currentSegmentData = segmentRanges.find(
-    ({ startFrame, endFrame }) => frame >= startFrame && frame < endFrame
-  );
-
-  const currentSegment = currentSegmentData?.segment;
-  const segmentProgress = currentSegmentData
-    ? (frame - currentSegmentData.startFrame) / currentSegmentData.durationFrames
-    : 0;
-
-  // Text fade in/out animation
-  const textOpacity = interpolate(
-    segmentProgress,
-    [0, 0.08, 0.92, 1],
-    [0, 1, 1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-  );
+  // Breathing animation for ambient feel
+  const breathing = Math.sin(frame / 60) * 0.05 + 0.95;
 
   // Title entrance animation (first 1 second)
   const titleOpacity = interpolate(frame, [0, fps * 0.5], [0, 1], {
@@ -240,108 +233,228 @@ const MainContent: React.FC<{ manifest: Manifest }> = ({ manifest }) => {
         fontFamily: "system-ui, -apple-system, sans-serif",
       }}
     >
-      {/* Top title bar */}
+      {/* Ambient background gradient */}
       <div
         style={{
           position: "absolute",
-          top: 50,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: `radial-gradient(ellipse at 50% 30%, rgba(0, 217, 255, 0.03) 0%, transparent 50%),
+                       radial-gradient(ellipse at 80% 80%, rgba(0, 255, 136, 0.02) 0%, transparent 40%)`,
+        }}
+      />
+
+      {/* Top brand bar */}
+      <div
+        style={{
+          position: "absolute",
+          top: 60,
           left: 0,
           right: 0,
           textAlign: "center",
-          opacity: titleOpacity,
+          opacity: titleOpacity * breathing,
         }}
       >
         <h1
           style={{
             color: "#00d9ff",
-            fontSize: 36,
+            fontSize: 48,
             fontWeight: 600,
             margin: 0,
-            textShadow: "0 2px 10px rgba(0,217,255,0.3)",
+            textShadow: "0 0 30px rgba(0, 217, 255, 0.3)",
+            letterSpacing: "0.05em",
           }}
         >
-          {title.length > 40 ? title.substring(0, 40) + "..." : title}
+          {lang === "zh" ? "极客禅" : "Geek Zen"}
         </h1>
+        <p
+          style={{
+            color: "#666",
+            fontSize: 24,
+            marginTop: 16,
+            maxWidth: "70%",
+            marginLeft: "auto",
+            marginRight: "auto",
+            lineHeight: 1.4,
+          }}
+        >
+          {title.length > 60 ? title.substring(0, 60) + "..." : title}
+        </p>
       </div>
 
-      {/* Current segment voiceover text */}
+      {/* Center: Zen progress bar animation */}
       <div
         style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "70%",
           display: "flex",
-          justifyContent: "center",
+          flexDirection: "column",
           alignItems: "center",
-          height: "100%",
-          padding: "0 100px",
+        }}
+      >
+        <ZenProgressBar frame={frame} fps={fps} totalFrames={durationInFrames} />
+      </div>
+
+      {/* Bottom branding */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 60,
+          left: 0,
+          right: 0,
+          textAlign: "center",
         }}
       >
         <p
           style={{
-            color: "#ffffff",
-            fontSize: 44,
-            fontWeight: 500,
-            textAlign: "center",
-            lineHeight: 1.6,
-            opacity: textOpacity,
-            maxWidth: "85%",
-            textShadow: "0 2px 8px rgba(0,0,0,0.5)",
+            color: "#333",
+            fontSize: 16,
+            fontStyle: "italic",
           }}
         >
-          {currentSegment?.voiceover || ""}
+          {lang === "zh"
+            ? "当你忘了进度条，加载就完成了"
+            : "When you forget the progress bar, loading completes"}
         </p>
       </div>
 
-      {/* Bottom info bar */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 50,
-          left: 0,
-          right: 0,
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          gap: 30,
-        }}
-      >
-        <span style={{ color: "#666", fontSize: 16 }}>
-          {currentSegment?.timestamp || "00:00"}
-        </span>
-        <span
-          style={{
-            color: "#00d9ff",
-            fontSize: 14,
-            padding: "4px 12px",
-            background: "rgba(0,217,255,0.1)",
-            borderRadius: 4,
-          }}
-        >
-          {currentSegment?.visual_hint || "loading"}
-        </span>
-        <span style={{ color: "#444", fontSize: 14 }}>
-          {segmentRanges.findIndex(s => s.segment === currentSegment) + 1} / {segments.length}
-        </span>
-      </div>
+      {/* Audio visualizer hint (subtle) */}
+      <AudioVisualizer frame={frame} />
+    </AbsoluteFill>
+  );
+};
 
-      {/* Progress bar */}
+// Zen Progress Bar - the signature visual element
+const ZenProgressBar: React.FC<{
+  frame: number;
+  fps: number;
+  totalFrames: number;
+}> = ({ frame, fps, totalFrames }) => {
+  // Progress crawls slowly toward 99% over the video duration
+  // Never quite reaches 100% - that's the zen koan
+  const maxProgress = 0.99;
+  const progress = interpolate(
+    frame,
+    [0, totalFrames * 0.8], // Reach 99% at 80% of video
+    [0, maxProgress],
+    { extrapolateRight: "clamp" }
+  );
+
+  // When progress is high, add subtle jitter (frustration/anticipation)
+  const isStuck = progress >= 0.97;
+  const jitter = isStuck ? Math.sin(frame * 0.5) * 3 : 0;
+
+  // Color shifts as progress increases
+  const progressColor = isStuck ? "#ff6b6b" : "#00d9ff";
+  const glowIntensity = isStuck ? 0.5 : 0.3;
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        transform: `translateX(${jitter}px)`,
+      }}
+    >
+      {/* Progress bar track */}
       <div
         style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 3,
-          background: "rgba(255,255,255,0.1)",
+          height: 8,
+          backgroundColor: "#1a1a2e",
+          borderRadius: 4,
+          overflow: "hidden",
+          boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)",
         }}
       >
+        {/* Progress bar fill */}
         <div
           style={{
+            width: `${progress * 100}%`,
             height: "100%",
-            width: `${(frame / (accumulatedFrames || 1)) * 100}%`,
-            background: "linear-gradient(90deg, #00d9ff, #00ffaa)",
+            backgroundColor: progressColor,
+            borderRadius: 4,
+            boxShadow: `0 0 15px rgba(${isStuck ? "255, 107, 107" : "0, 217, 255"}, ${glowIntensity})`,
+            transition: "background-color 0.3s ease",
           }}
         />
       </div>
-    </AbsoluteFill>
+
+      {/* Percentage display */}
+      <div
+        style={{
+          textAlign: "right",
+          marginTop: 12,
+          color: isStuck ? "#ff6b6b" : "#444",
+          fontSize: 18,
+          fontFamily: "JetBrains Mono, Consolas, monospace",
+          fontWeight: 500,
+        }}
+      >
+        {Math.floor(progress * 100)}%{isStuck && " ..."}
+      </div>
+
+      {/* Zen message when stuck */}
+      {isStuck && (
+        <div
+          style={{
+            textAlign: "center",
+            marginTop: 40,
+            color: "#555",
+            fontSize: 14,
+            opacity: Math.sin(frame / 30) * 0.3 + 0.7,
+          }}
+        >
+          {frame % (fps * 4) < fps * 2
+            ? "Almost there..."
+            : "Just a moment..."}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Subtle audio visualizer (ambient bars)
+const AudioVisualizer: React.FC<{ frame: number }> = ({ frame }) => {
+  const barCount = 5;
+  const bars = Array.from({ length: barCount }, (_, i) => {
+    // Each bar has a different phase for organic movement
+    const phase = (i / barCount) * Math.PI * 2;
+    const height = 20 + Math.sin(frame / 15 + phase) * 15;
+    const opacity = 0.15 + Math.sin(frame / 20 + phase) * 0.1;
+
+    return (
+      <div
+        key={i}
+        style={{
+          width: 3,
+          height: height,
+          backgroundColor: "#00d9ff",
+          borderRadius: 2,
+          opacity: opacity,
+        }}
+      />
+    );
+  });
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: 120,
+        left: "50%",
+        transform: "translateX(-50%)",
+        display: "flex",
+        gap: 6,
+        alignItems: "flex-end",
+        height: 50,
+      }}
+    >
+      {bars}
+    </div>
   );
 };
 
