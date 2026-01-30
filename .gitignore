@@ -10,3 +10,6 @@ node_modules/
 
 # Backup directories
 src_backup_*/
+
+# Dynamically created audio files during rendering
+public/*/audio/
