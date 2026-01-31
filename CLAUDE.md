@@ -3470,5 +3470,156 @@ orchestrator                          video-renderer
 ### 开发效率
 - [ ] draft 渲染 < 30 秒？
 - [ ] 自动预览工作正常？
-- [ ] æ+ pacingStats？
+- [ ] render_report 包含 pacingStats？
+
+---
+
+## 🎙️ NotebookLM Audio Support (Jan 2026)
+
+### Overview
+
+Video-renderer now supports **audio-driven video rendering** with NotebookLM-generated audio files. The system dynamically calculates video duration based on the audio file's length, enabling perfect audio-visual synchronization.
+
+### Architecture
+
+```
+orchestrator                              video-renderer
+     │                                          │
+     │  1. Generate scripts (EN/ZH)             │
+     │  2. Set status: pending_audio            │
+     │                                          │
+     │  [User creates audio via NotebookLM]     │
+     │                                          │
+     │  3. Heartbeat detects audio files        │
+     │  4. Validate audio (ffprobe)             │
+     │  5. Update manifest: audio_status=ready  │
+     │  6. Set status: rendering                │
+     │                                          │
+     │  manifest.json + audio files             │
+     │ ──────────────────────────────────────> │
+     │                                          │
+     │                                          │ 7. Read audio duration
+     │                                          │ 8. Calculate durationInFrames
+     │                                          │ 9. Render with Remotion
+     │                                          │
+     │  render_report.json + video.mp4          │
+     │ <────────────────────────────────────── │
+```
+
+### CLI Usage
+
+```bash
+# Render with language-specific audio
+node render.mjs --manifest=/path/to/manifest.json --lang=en
+
+# With render profile
+node render.mjs --manifest=/path/to/manifest.json --lang=zh --profile=production
+
+# Available options
+--manifest   Path to manifest.json (required)
+--lang       Language code: en | zh (required for audio-driven render)
+--profile    Render quality: draft | preview | production (default: preview)
+--output     Output directory (default: ./output/{projectId}/{lang}/)
+```
+
+### Audio File Structure
+
+```
+active_projects/{projectId}/
+├── manifest.json
+└── audio/
+    ├── en/
+    │   └── audio.mp3    # English NotebookLM audio
+    └── zh/
+        └── audio.mp3    # Chinese NotebookLM audio
+```
+
+### Audio Validation (ffprobe)
+
+Video-renderer validates audio files using `ffprobe` (Node.js compatible, not browser-only Remotion APIs):
+
+```javascript
+// Audio validation extracts:
+{
+  duration: 30.040816,      // seconds
+  codec: "mp3",             // codec_name
+  sampleRate: 44100,        // Hz
+  bitrate: 64               // kbps
+}
+
+// Validation checks:
+// - Duration: 5-600 seconds (sanity check)
+// - Codec: mp3, aac, opus, wav, flac (supported formats)
+// - Sample rate: 22050-96000 Hz
+```
+
+### Duration Calculation
+
+```javascript
+// Video duration = audio duration + buffer frames
+const audioDuration = validateAudioFile(audioPath).duration;  // e.g., 30.04s
+const fps = 30;
+const bufferFrames = 60;  // 2 seconds buffer (fade in/out)
+
+const durationInFrames = Math.ceil(audioDuration * fps) + bufferFrames;
+// Example: ceil(30.04 * 30) + 60 = 902 + 60 = 962 frames
+```
+
+### Manifest Audio Schema
+
+```json
+{
+  "audio": {
+    "source": "notebooklm",
+    "languages": {
+      "en": {
+        "audio_status": "ready",
+        "duration_seconds": 30.040816,
+        "audio_path": "audio/en/audio.mp3"
+      },
+      "zh": {
+        "audio_status": "ready",
+        "duration_seconds": 45.035102,
+        "audio_path": "audio/zh/audio.mp3"
+      }
+    }
+  }
+}
+```
+
+### Render Report Output
+
+```json
+{
+  "projectId": "cc13c849-962a-430a-aa9c-a28055a82dd5",
+  "language": "en",
+  "audioDuration": 30.040816,
+  "videoDuration": 32.066666,
+  "composition": {
+    "durationInFrames": 962,
+    "fps": 30
+  },
+  "audioValidation": {
+    "codec": "mp3",
+    "sampleRate": 44100,
+    "bitrate": 64
+  }
+}
+```
+
+### Error Handling
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Audio file not found` | Missing audio file | Check audio path in manifest |
+| `Audio duration invalid` | ffprobe parse failure | Verify audio file integrity |
+| `Duration out of range` | < 5s or > 600s | Re-generate audio with proper length |
+| `Unsupported codec` | Non-standard format | Convert to mp3/aac/opus |
+
+### Integration Notes
+
+1. **ffprobe Required**: Ensure `ffprobe` (part of FFmpeg) is installed on the system
+2. **Audio-First Duration**: Video duration is ALWAYS derived from audio, never hardcoded
+3. **Buffer Frames**: 60 frames (2s) added for fade transitions
+4. **Glitch Protection**: First/last 30 frames protected from transitions
 

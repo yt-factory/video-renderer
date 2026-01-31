@@ -22,7 +22,6 @@
 
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
-import { getAudioDurationInSeconds } from "@remotion/media-utils";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -69,8 +68,15 @@ async function validateAudioFile(audioPath) {
   }
 
   try {
-    // Get audio duration using Remotion's utility
-    result.duration = await getAudioDurationInSeconds(audioPath);
+    // Get audio duration and codec info using ffprobe (works in Node.js)
+    const ffprobeResult = execSync(
+      `ffprobe -v error -select_streams a:0 -show_entries format=duration -show_entries stream=codec_name,sample_rate,bit_rate -of json "${audioPath}"`,
+      { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+    );
+    const probeData = JSON.parse(ffprobeResult);
+
+    // Get duration from format
+    result.duration = parseFloat(probeData.format?.duration);
 
     // Duration sanity checks
     if (isNaN(result.duration) || result.duration <= 0) {
@@ -90,29 +96,22 @@ async function validateAudioFile(audioPath) {
       return result;
     }
 
-    // Try to get codec info using ffprobe (optional - won't fail if not available)
-    try {
-      const ffprobeResult = execSync(
-        `ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,bit_rate -of json "${audioPath}"`,
-        { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
-      );
-      const probeData = JSON.parse(ffprobeResult);
-      const stream = probeData.streams?.[0];
-      if (stream) {
-        result.codec = stream.codec_name || "unknown";
-        result.sampleRate = parseInt(stream.sample_rate) || null;
-        result.bitrate = stream.bit_rate ? Math.round(parseInt(stream.bit_rate) / 1000) : null;
+    // Get codec info from stream
+    const stream = probeData.streams?.[0];
+    if (stream) {
+      result.codec = stream.codec_name || "unknown";
+      result.sampleRate = parseInt(stream.sample_rate) || null;
+      result.bitrate = stream.bit_rate ? Math.round(parseInt(stream.bit_rate) / 1000) : null;
 
-        // Check for supported codecs
-        const supportedCodecs = ["mp3", "aac", "opus", "vorbis", "flac", "pcm_s16le", "pcm_f32le"];
-        if (!supportedCodecs.includes(result.codec)) {
-          result.error = `Unsupported audio codec: ${result.codec}. Supported: ${supportedCodecs.join(", ")}`;
-          return result;
-        }
+      // Check for supported codecs
+      const supportedCodecs = ["mp3", "aac", "opus", "vorbis", "flac", "pcm_s16le", "pcm_f32le"];
+      if (!supportedCodecs.includes(result.codec)) {
+        result.error = `Unsupported audio codec: ${result.codec}. Supported: ${supportedCodecs.join(", ")}`;
+        return result;
       }
-    } catch {
-      // ffprobe not available - that's okay, we still have duration
-      result.codec = "mp3"; // Assume MP3 based on extension
+    } else {
+      // Fallback if no stream info
+      result.codec = "mp3";
       result.sampleRate = 44100;
       result.bitrate = 128;
     }
