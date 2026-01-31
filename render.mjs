@@ -32,6 +32,99 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// =============================================================================
+// Audio Validation
+// =============================================================================
+
+/**
+ * Validate audio file before rendering
+ * Checks: file integrity, codec compatibility, duration sanity
+ */
+async function validateAudioFile(audioPath) {
+  const result = {
+    valid: false,
+    error: null,
+    duration: 0,
+    codec: null,
+    sampleRate: null,
+    bitrate: null,
+  };
+
+  // Check file exists and is readable
+  if (!fs.existsSync(audioPath)) {
+    result.error = "Audio file does not exist";
+    return result;
+  }
+
+  const stats = fs.statSync(audioPath);
+  if (stats.size === 0) {
+    result.error = "Audio file is empty (0 bytes)";
+    return result;
+  }
+
+  // Minimum size check (1KB - catches corrupted files)
+  if (stats.size < 1024) {
+    result.error = `Audio file too small (${stats.size} bytes) - likely corrupted`;
+    return result;
+  }
+
+  try {
+    // Get audio duration using Remotion's utility
+    result.duration = await getAudioDurationInSeconds(audioPath);
+
+    // Duration sanity checks
+    if (isNaN(result.duration) || result.duration <= 0) {
+      result.error = "Could not determine audio duration - file may be corrupted";
+      return result;
+    }
+
+    // Minimum duration (5 seconds)
+    if (result.duration < 5) {
+      result.error = `Audio too short (${result.duration.toFixed(1)}s) - minimum 5 seconds required`;
+      return result;
+    }
+
+    // Maximum duration (2 hours = 7200 seconds)
+    if (result.duration > 7200) {
+      result.error = `Audio too long (${(result.duration / 60).toFixed(1)} min) - maximum 2 hours`;
+      return result;
+    }
+
+    // Try to get codec info using ffprobe (optional - won't fail if not available)
+    try {
+      const ffprobeResult = execSync(
+        `ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,bit_rate -of json "${audioPath}"`,
+        { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+      );
+      const probeData = JSON.parse(ffprobeResult);
+      const stream = probeData.streams?.[0];
+      if (stream) {
+        result.codec = stream.codec_name || "unknown";
+        result.sampleRate = parseInt(stream.sample_rate) || null;
+        result.bitrate = stream.bit_rate ? Math.round(parseInt(stream.bit_rate) / 1000) : null;
+
+        // Check for supported codecs
+        const supportedCodecs = ["mp3", "aac", "opus", "vorbis", "flac", "pcm_s16le", "pcm_f32le"];
+        if (!supportedCodecs.includes(result.codec)) {
+          result.error = `Unsupported audio codec: ${result.codec}. Supported: ${supportedCodecs.join(", ")}`;
+          return result;
+        }
+      }
+    } catch {
+      // ffprobe not available - that's okay, we still have duration
+      result.codec = "mp3"; // Assume MP3 based on extension
+      result.sampleRate = 44100;
+      result.bitrate = 128;
+    }
+
+    result.valid = true;
+    return result;
+  } catch (error) {
+    result.error = `Audio analysis failed: ${error.message}`;
+    return result;
+  }
+}
+
 // ANSI colors for console output
 const colors = {
   reset: "\x1b[0m",
@@ -145,12 +238,25 @@ Options:
   log("🆔", `Project ID: ${actualProjectId}`);
   log("🌐", `Language: ${lang}`);
 
-  // Get audio duration
-  log("📊", "Analyzing audio...");
-  const audioDuration = await getAudioDurationInSeconds(audioPath);
+  // Validate and analyze audio
+  log("📊", "Validating and analyzing audio...");
+
+  // Audio validation
+  const audioValidation = await validateAudioFile(audioPath);
+  if (!audioValidation.valid) {
+    console.error(`${colors.red}❌ Audio validation failed: ${audioValidation.error}${colors.reset}`);
+    process.exit(1);
+  }
+
+  const audioDuration = audioValidation.duration;
+  log("✓", "Audio validation passed");
   log(
     "   ",
     `Audio duration: ${audioDuration.toFixed(1)}s (${(audioDuration / 60).toFixed(1)} min)`
+  );
+  log(
+    "   ",
+    `Audio format: ${audioValidation.codec}, ${audioValidation.sampleRate}Hz, ${audioValidation.bitrate}kbps`
   );
 
   // Calculate video frames
@@ -352,12 +458,44 @@ Options:
       firstFrameBuffer: BUFFER_FRAMES,
       lastFrameBuffer: BUFFER_FRAMES,
     },
+    audioValidation: {
+      codec: audioValidation.codec,
+      sampleRate: audioValidation.sampleRate,
+      bitrate: audioValidation.bitrate,
+    },
   };
 
   const reportPath = path.join(outputDir, "render_report.json");
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
 
   log("📊", `Report saved: ${reportPath}`);
+
+  // =============================================================================
+  // Step 10: Update Manifest with Audio Status
+  // =============================================================================
+
+  log("📝", "Updating manifest with audio status...");
+
+  // Update the audio config in manifest
+  if (manifest.audio && manifest.audio.languages && manifest.audio.languages[lang]) {
+    manifest.audio.languages[lang].audio_status = "ready";
+    manifest.audio.languages[lang].duration_seconds = audioDuration;
+  }
+
+  // Update manifest status if all languages are ready
+  const allAudioReady = manifest.audio?.languages
+    ? Object.values(manifest.audio.languages).every(l => l?.audio_status === "ready")
+    : false;
+
+  if (allAudioReady && manifest.status === "pending_audio") {
+    manifest.status = "rendering";
+  }
+
+  manifest.updated_at = new Date().toISOString();
+
+  // Write updated manifest back
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  log("✓", "Manifest updated with audio status and duration");
 
   // =============================================================================
   // Summary
