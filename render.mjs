@@ -32,6 +32,87 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // =============================================================================
+// Early Manifest Validation (before expensive operations)
+// =============================================================================
+
+/**
+ * Validate manifest structure early to fail fast before expensive bundling
+ * This is a lightweight check - not full Zod validation (which requires building)
+ * @param {object} manifest - Parsed manifest JSON
+ * @returns {string[]} - Array of error messages (empty if valid)
+ */
+function validateManifestEarly(manifest) {
+  const errors = [];
+
+  // Required top-level fields
+  if (!manifest.project_id || typeof manifest.project_id !== 'string') {
+    errors.push('Missing or invalid project_id (expected UUID string)');
+  }
+
+  if (!manifest.status || typeof manifest.status !== 'string') {
+    errors.push('Missing or invalid status');
+  }
+
+  if (!manifest.created_at || typeof manifest.created_at !== 'string') {
+    errors.push('Missing or invalid created_at timestamp');
+  }
+
+  // input_source validation
+  if (!manifest.input_source || typeof manifest.input_source !== 'object') {
+    errors.push('Missing input_source object');
+  } else {
+    if (typeof manifest.input_source.word_count !== 'number' || manifest.input_source.word_count <= 0) {
+      errors.push('input_source.word_count must be a positive number');
+    }
+  }
+
+  // content_engine validation (if present)
+  if (manifest.content_engine) {
+    const ce = manifest.content_engine;
+
+    // Script validation
+    if (ce.script && !Array.isArray(ce.script)) {
+      errors.push('content_engine.script must be an array');
+    } else if (ce.script && ce.script.length > 0) {
+      // Validate first script segment structure
+      const firstSeg = ce.script[0];
+      if (!firstSeg.timestamp || !firstSeg.voiceover || !firstSeg.visual_hint) {
+        errors.push('Script segments must have timestamp, voiceover, and visual_hint');
+      }
+    }
+
+    // SEO validation
+    if (ce.seo && typeof ce.seo !== 'object') {
+      errors.push('content_engine.seo must be an object');
+    }
+
+    // Shorts validation
+    if (ce.shorts && typeof ce.shorts !== 'object') {
+      errors.push('content_engine.shorts must be an object');
+    }
+
+    // Media preference validation
+    if (ce.media_preference && typeof ce.media_preference !== 'object') {
+      errors.push('content_engine.media_preference must be an object');
+    }
+
+    // Duration validation
+    if (typeof ce.estimated_duration_seconds !== 'number' || ce.estimated_duration_seconds <= 0) {
+      errors.push('content_engine.estimated_duration_seconds must be a positive number');
+    }
+  }
+
+  // Audio config validation (if present)
+  if (manifest.audio) {
+    if (!manifest.audio.languages || typeof manifest.audio.languages !== 'object') {
+      errors.push('audio.languages must be an object');
+    }
+  }
+
+  return errors;
+}
+
+// =============================================================================
 // Audio Validation
 // =============================================================================
 
@@ -225,12 +306,30 @@ Options:
   }
 
   // =============================================================================
-  // Step 2: Read Manifest and Analyze Audio
+  // Step 2: Read and Validate Manifest (EARLY - before expensive operations)
   // =============================================================================
 
   // Read manifest
   log("📄", "Loading manifest", manifestPath);
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  const manifestRaw = fs.readFileSync(manifestPath, "utf-8");
+
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestRaw);
+  } catch (parseError) {
+    console.error(`${colors.red}❌ Manifest is not valid JSON: ${parseError.message}${colors.reset}`);
+    process.exit(1);
+  }
+
+  // Early manifest validation (before expensive bundling)
+  log("🔍", "Validating manifest schema...");
+  const manifestErrors = validateManifestEarly(manifest);
+  if (manifestErrors.length > 0) {
+    console.error(`${colors.red}❌ Manifest validation failed:${colors.reset}`);
+    manifestErrors.forEach(err => console.error(`   ${colors.red}- ${err}${colors.reset}`));
+    process.exit(1);
+  }
+  log("✓", "Manifest schema valid");
 
   const actualProjectId =
     manifest.project_id || projectId.replace(".json", "").split("/").pop();
