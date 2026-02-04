@@ -7,7 +7,7 @@ export const ScriptSegmentSchema = z.object({
     'code_block',
     'diagram',
     'text_animation',
-    'b_roll',
+    'b-roll',
     'screen_recording',
     'talking_head_placeholder',
   ]),
