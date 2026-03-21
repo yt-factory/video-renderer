@@ -7,6 +7,7 @@ import {
   useVideoConfig,
   interpolate,
   Sequence,
+  spring,
 } from "remotion";
 
 // Render metadata for tracing
@@ -62,6 +63,27 @@ export interface MainVideoProps {
 }
 
 const BUFFER_FRAMES = 30; // 1 second buffer for fade in/out
+const ACCENT_COLOR = "#00d9ff";
+const BG_COLOR = "#0a0a0f";
+
+// Visual hint icon mapping
+const VISUAL_HINT_ICONS: Record<string, string> = {
+  code_block: "\u2318", // command key symbol
+  diagram: "\u25C6", // diamond
+  text_animation: "\u2726", // 4-pointed star
+  "b-roll": "\u25CE", // bullseye
+  screen_recording: "\u25A3", // square with fill
+  talking_head_placeholder: "\u263A", // smiley
+};
+
+const VISUAL_HINT_COLORS: Record<string, string> = {
+  code_block: "#a78bfa",
+  diagram: "#34d399",
+  text_animation: "#fbbf24",
+  "b-roll": "#f87171",
+  screen_recording: "#60a5fa",
+  talking_head_placeholder: "#fb923c",
+};
 
 export const MainVideo: React.FC<MainVideoProps> = ({
   manifest,
@@ -81,15 +103,19 @@ export const MainVideo: React.FC<MainVideoProps> = ({
   // Get title for the specified language
   const regionalSeo = manifest.content_engine?.seo?.regional_seo || [];
   const langSeo = regionalSeo.find((r) => r.language === lang);
-  const fallbackSeo = regionalSeo.find((r) => r.language === "en") || regionalSeo[0];
+  const fallbackSeo =
+    regionalSeo.find((r) => r.language === "en") || regionalSeo[0];
   const title =
     langSeo?.titles?.[0] ||
     fallbackSeo?.titles?.[0] ||
     manifest.seo?.title ||
-    (lang === "zh" ? "极客禅" : "Geek Zen");
+    (lang === "zh" ? "\u6781\u5BA2\u7985" : "Geek Zen");
+
+  const segments = manifest.content_engine?.script || [];
+  const tags = manifest.content_engine?.seo?.tags || [];
 
   return (
-    <AbsoluteFill style={{ backgroundColor: "#0a0a0f" }}>
+    <AbsoluteFill style={{ backgroundColor: BG_COLOR }}>
       {/* Audio layer - plays during content (after buffer) */}
       {audioFile && (
         <Sequence from={BUFFER_FRAMES}>
@@ -102,9 +128,15 @@ export const MainVideo: React.FC<MainVideoProps> = ({
         <FadeIn />
       </Sequence>
 
-      {/* Main content */}
+      {/* Main content with segment rendering */}
       <Sequence from={BUFFER_FRAMES} durationInFrames={contentDuration}>
-        <MainContent title={title} lang={lang} />
+        <MainContent
+          title={title}
+          lang={lang}
+          segments={segments}
+          tags={tags}
+          contentDuration={contentDuration}
+        />
       </Sequence>
 
       {/* Closing fade out */}
@@ -115,7 +147,7 @@ export const MainVideo: React.FC<MainVideoProps> = ({
         <FadeOut />
       </Sequence>
 
-      {/* Render metadata watermark (only in production renders) */}
+      {/* Render metadata watermark */}
       {renderMeta && (
         <div
           style={{
@@ -123,7 +155,7 @@ export const MainVideo: React.FC<MainVideoProps> = ({
             bottom: 10,
             right: 10,
             fontSize: 10,
-            color: "rgba(255,255,255,0.2)",
+            color: "rgba(255,255,255,0.15)",
             fontFamily: "monospace",
           }}
         >
@@ -137,20 +169,21 @@ export const MainVideo: React.FC<MainVideoProps> = ({
 // Preview placeholder for Remotion Studio
 const PreviewPlaceholder: React.FC = () => {
   const frame = useCurrentFrame();
-  // Breathing animation
   const breathing = Math.sin(frame / 30) * 0.1 + 0.9;
 
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: "#0a0a0f",
+        backgroundColor: BG_COLOR,
         justifyContent: "center",
         alignItems: "center",
         fontFamily: "system-ui, sans-serif",
       }}
     >
       <div style={{ textAlign: "center", opacity: breathing }}>
-        <h1 style={{ color: "#00d9ff", fontSize: 72, margin: 0 }}>极客禅</h1>
+        <h1 style={{ color: ACCENT_COLOR, fontSize: 72, margin: 0 }}>
+          {"\u6781\u5BA2\u7985"}
+        </h1>
         <p style={{ color: "#666", fontSize: 28, marginTop: 20 }}>
           YT-Factory Video Renderer
         </p>
@@ -174,7 +207,6 @@ const PreviewPlaceholder: React.FC = () => {
   );
 };
 
-// Status badge component
 const StatusBadge: React.FC<{
   label: string;
   status: "ready" | "waiting" | "error";
@@ -210,26 +242,71 @@ const StatusBadge: React.FC<{
   );
 };
 
-// Main content renderer - zen-themed for NotebookLM audio
-const MainContent: React.FC<{ title: string; lang: string }> = ({
-  title,
-  lang,
-}) => {
+// Calculate frame ranges for each segment proportionally
+function calculateSegmentFrames(
+  segments: Segment[],
+  totalFrames: number
+): Array<{ from: number; duration: number }> {
+  if (segments.length === 0) return [];
+
+  const totalDuration = segments.reduce(
+    (sum, s) => sum + s.estimated_duration_seconds,
+    0
+  );
+  if (totalDuration === 0) return [];
+
+  const result: Array<{ from: number; duration: number }> = [];
+  let currentFrame = 0;
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const proportion = seg.estimated_duration_seconds / totalDuration;
+    const segFrames =
+      i === segments.length - 1
+        ? totalFrames - currentFrame // Last segment gets remaining frames
+        : Math.round(totalFrames * proportion);
+
+    result.push({ from: currentFrame, duration: Math.max(1, segFrames) });
+    currentFrame += segFrames;
+  }
+
+  return result;
+}
+
+// Main content renderer with segment-based rendering
+const MainContent: React.FC<{
+  title: string;
+  lang: string;
+  segments: Segment[];
+  tags: string[];
+  contentDuration: number;
+}> = ({ title, lang, segments, tags, contentDuration }) => {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames } = useVideoConfig();
+  const { fps } = useVideoConfig();
 
-  // Breathing animation for ambient feel
-  const breathing = Math.sin(frame / 60) * 0.05 + 0.95;
-
-  // Title entrance animation (first 1 second)
-  const titleOpacity = interpolate(frame, [0, fps * 0.5], [0, 1], {
+  // Title entrance animation
+  const titleOpacity = interpolate(frame, [0, fps * 0.8], [0, 1], {
     extrapolateRight: "clamp",
   });
+
+  // Calculate segment timing
+  const segmentFrames = calculateSegmentFrames(segments, contentDuration);
+
+  // Find current segment index
+  const currentSegIdx = segmentFrames.findIndex(
+    (sf) => frame >= sf.from && frame < sf.from + sf.duration
+  );
+  const currentSegment = currentSegIdx >= 0 ? segments[currentSegIdx] : null;
+  const currentTiming =
+    currentSegIdx >= 0 ? segmentFrames[currentSegIdx] : null;
+
+  // Overall progress
+  const progress = frame / contentDuration;
 
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: "#0a0a0f",
+        backgroundColor: BG_COLOR,
         fontFamily: "system-ui, -apple-system, sans-serif",
       }}
     >
@@ -246,185 +323,435 @@ const MainContent: React.FC<{ title: string; lang: string }> = ({
         }}
       />
 
+      {/* Visual hint background effect */}
+      {currentSegment && (
+        <VisualHintBackground
+          visualHint={currentSegment.visual_hint}
+          frame={frame}
+          segmentFrame={currentTiming ? frame - currentTiming.from : 0}
+        />
+      )}
+
       {/* Top brand bar */}
       <div
         style={{
           position: "absolute",
-          top: 60,
-          left: 0,
-          right: 0,
-          textAlign: "center",
-          opacity: titleOpacity * breathing,
+          top: 40,
+          left: 80,
+          right: 80,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          opacity: titleOpacity,
         }}
       >
         <h1
           style={{
-            color: "#00d9ff",
-            fontSize: 48,
+            color: ACCENT_COLOR,
+            fontSize: 36,
             fontWeight: 600,
             margin: 0,
-            textShadow: "0 0 30px rgba(0, 217, 255, 0.3)",
+            textShadow: "0 0 20px rgba(0, 217, 255, 0.3)",
             letterSpacing: "0.05em",
           }}
         >
-          {lang === "zh" ? "极客禅" : "Geek Zen"}
+          {lang === "zh" ? "\u6781\u5BA2\u7985" : "Geek Zen"}
         </h1>
+
+        {/* Segment counter */}
+        {segments.length > 0 && currentSegIdx >= 0 && (
+          <div
+            style={{
+              color: "#555",
+              fontSize: 16,
+              fontFamily: "JetBrains Mono, Consolas, monospace",
+            }}
+          >
+            {currentSegIdx + 1}/{segments.length}
+          </div>
+        )}
+      </div>
+
+      {/* Episode title */}
+      <div
+        style={{
+          position: "absolute",
+          top: 100,
+          left: 80,
+          right: 80,
+          opacity: titleOpacity * 0.7,
+        }}
+      >
         <p
           style={{
-            color: "#666",
-            fontSize: 24,
-            marginTop: 16,
-            maxWidth: "70%",
-            marginLeft: "auto",
-            marginRight: "auto",
+            color: "#555",
+            fontSize: 20,
+            margin: 0,
             lineHeight: 1.4,
           }}
         >
-          {title.length > 60 ? title.substring(0, 60) + "..." : title}
+          {title.length > 80 ? title.substring(0, 80) + "..." : title}
         </p>
       </div>
 
-      {/* Center: Zen progress bar animation */}
+      {/* Center: Current segment content */}
       <div
         style={{
           position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: "70%",
+          top: "22%",
+          left: 80,
+          right: 80,
+          bottom: "22%",
           display: "flex",
           flexDirection: "column",
+          justifyContent: "center",
           alignItems: "center",
         }}
       >
-        <ZenProgressBar frame={frame} fps={fps} totalFrames={durationInFrames} />
+        {currentSegment && currentTiming ? (
+          <SegmentRenderer
+            segment={currentSegment}
+            segmentIndex={currentSegIdx}
+            localFrame={frame - currentTiming.from}
+            segmentDuration={currentTiming.duration}
+            fps={fps}
+          />
+        ) : segments.length === 0 ? (
+          <div style={{ color: "#444", fontSize: 24 }}>
+            {lang === "zh" ? "\u7B49\u5F85\u5185\u5BB9..." : "Awaiting content..."}
+          </div>
+        ) : null}
       </div>
 
-      {/* Bottom branding */}
+      {/* Bottom: Progress bar + tags */}
       <div
         style={{
           position: "absolute",
-          bottom: 60,
-          left: 0,
-          right: 0,
-          textAlign: "center",
+          bottom: 40,
+          left: 80,
+          right: 80,
         }}
       >
-        <p
+        {/* Tags */}
+        {tags.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              marginBottom: 20,
+              flexWrap: "wrap",
+              justifyContent: "center",
+              opacity: 0.4,
+            }}
+          >
+            {tags.slice(0, 5).map((tag, i) => (
+              <span
+                key={i}
+                style={{
+                  color: "#666",
+                  fontSize: 12,
+                  padding: "3px 10px",
+                  border: "1px solid #333",
+                  borderRadius: 12,
+                }}
+              >
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Progress bar */}
+        <div
           style={{
-            color: "#333",
-            fontSize: 16,
-            fontStyle: "italic",
+            height: 3,
+            backgroundColor: "#1a1a2e",
+            borderRadius: 2,
+            overflow: "hidden",
           }}
         >
-          {lang === "zh"
-            ? "当你忘了进度条，加载就完成了"
-            : "When you forget the progress bar, loading completes"}
-        </p>
+          <div
+            style={{
+              width: `${progress * 100}%`,
+              height: "100%",
+              backgroundColor: ACCENT_COLOR,
+              borderRadius: 2,
+              boxShadow: `0 0 8px rgba(0, 217, 255, 0.3)`,
+            }}
+          />
+        </div>
+
+        {/* Timestamp */}
+        {currentSegment && (
+          <div
+            style={{
+              textAlign: "right",
+              marginTop: 8,
+              color: "#444",
+              fontSize: 14,
+              fontFamily: "JetBrains Mono, Consolas, monospace",
+            }}
+          >
+            {currentSegment.timestamp}
+          </div>
+        )}
       </div>
 
-      {/* Audio visualizer hint (subtle) */}
+      {/* Audio visualizer */}
       <AudioVisualizer frame={frame} />
     </AbsoluteFill>
   );
 };
 
-// Zen Progress Bar - the signature visual element
-const ZenProgressBar: React.FC<{
-  frame: number;
+// Segment renderer - displays content based on visual_hint
+const SegmentRenderer: React.FC<{
+  segment: Segment;
+  segmentIndex: number;
+  localFrame: number;
+  segmentDuration: number;
   fps: number;
-  totalFrames: number;
-}> = ({ frame, fps, totalFrames }) => {
-  // Progress crawls slowly toward 99% over the video duration
-  // Never quite reaches 100% - that's the zen koan
-  const maxProgress = 0.99;
-  const progress = interpolate(
-    frame,
-    [0, totalFrames * 0.8], // Reach 99% at 80% of video
-    [0, maxProgress],
-    { extrapolateRight: "clamp" }
-  );
+}> = ({ segment, segmentIndex, localFrame, segmentDuration, fps }) => {
+  // Entrance animation
+  const enterProgress = spring({
+    frame: localFrame,
+    fps,
+    config: { damping: 15, stiffness: 80 },
+  });
 
-  // When progress is high, add subtle jitter (frustration/anticipation)
-  const isStuck = progress >= 0.97;
-  const jitter = isStuck ? Math.sin(frame * 0.5) * 3 : 0;
+  // Exit animation (last 0.5s of segment)
+  const exitStart = segmentDuration - Math.round(fps * 0.5);
+  const exitOpacity =
+    localFrame > exitStart
+      ? interpolate(localFrame, [exitStart, segmentDuration], [1, 0], {
+          extrapolateRight: "clamp",
+        })
+      : 1;
 
-  // Color shifts as progress increases
-  const progressColor = isStuck ? "#ff6b6b" : "#00d9ff";
-  const glowIntensity = isStuck ? 0.5 : 0.3;
+  const hintColor =
+    VISUAL_HINT_COLORS[segment.visual_hint] || ACCENT_COLOR;
+  const hintIcon =
+    VISUAL_HINT_ICONS[segment.visual_hint] || "\u2726";
 
   return (
     <div
       style={{
         width: "100%",
-        transform: `translateX(${jitter}px)`,
+        maxWidth: 1200,
+        opacity: enterProgress * exitOpacity,
+        transform: `translateY(${interpolate(enterProgress, [0, 1], [20, 0])}px)`,
       }}
     >
-      {/* Progress bar track */}
+      {/* Visual hint badge */}
       <div
         style={{
-          height: 8,
-          backgroundColor: "#1a1a2e",
-          borderRadius: 4,
-          overflow: "hidden",
-          boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 24,
         }}
       >
-        {/* Progress bar fill */}
-        <div
+        <span
           style={{
-            width: `${progress * 100}%`,
-            height: "100%",
-            backgroundColor: progressColor,
-            borderRadius: 4,
-            boxShadow: `0 0 15px rgba(${isStuck ? "255, 107, 107" : "0, 217, 255"}, ${glowIntensity})`,
-            transition: "background-color 0.3s ease",
-          }}
-        />
-      </div>
-
-      {/* Percentage display */}
-      <div
-        style={{
-          textAlign: "right",
-          marginTop: 12,
-          color: isStuck ? "#ff6b6b" : "#444",
-          fontSize: 18,
-          fontFamily: "JetBrains Mono, Consolas, monospace",
-          fontWeight: 500,
-        }}
-      >
-        {Math.floor(progress * 100)}%{isStuck && " ..."}
-      </div>
-
-      {/* Zen message when stuck */}
-      {isStuck && (
-        <div
-          style={{
-            textAlign: "center",
-            marginTop: 40,
-            color: "#555",
-            fontSize: 14,
-            opacity: Math.sin(frame / 30) * 0.3 + 0.7,
+            color: hintColor,
+            fontSize: 20,
+            width: 36,
+            height: 36,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: `1px solid ${hintColor}40`,
+            borderRadius: 8,
+            backgroundColor: `${hintColor}10`,
           }}
         >
-          {frame % (fps * 4) < fps * 2
-            ? "Almost there..."
-            : "Just a moment..."}
-        </div>
-      )}
+          {hintIcon}
+        </span>
+        <span
+          style={{
+            color: hintColor,
+            fontSize: 14,
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            fontWeight: 600,
+          }}
+        >
+          {segment.visual_hint.replace(/[-_]/g, " ")}
+        </span>
+
+        {/* Emotional trigger indicator */}
+        {segment.emotional_trigger && (
+          <span
+            style={{
+              color: "#888",
+              fontSize: 12,
+              padding: "2px 8px",
+              border: "1px solid #444",
+              borderRadius: 10,
+              marginLeft: "auto",
+            }}
+          >
+            {segment.emotional_trigger}
+          </span>
+        )}
+      </div>
+
+      {/* Voiceover text - the main content */}
+      <VoiceoverDisplay
+        text={segment.voiceover}
+        emphasisWords={segment.emphasis_words}
+        localFrame={localFrame}
+        segmentDuration={segmentDuration}
+        fps={fps}
+        accentColor={hintColor}
+      />
+
+      {/* Timestamp */}
+      <div
+        style={{
+          marginTop: 30,
+          color: "#333",
+          fontSize: 16,
+          fontFamily: "JetBrains Mono, Consolas, monospace",
+        }}
+      >
+        [{segment.timestamp}]{" "}
+        <span style={{ color: "#444" }}>
+          ~{segment.estimated_duration_seconds}s
+        </span>
+      </div>
     </div>
   );
 };
 
-// Subtle audio visualizer (ambient bars)
+// Voiceover text display with word-level animation
+const VoiceoverDisplay: React.FC<{
+  text: string;
+  emphasisWords?: string[];
+  localFrame: number;
+  segmentDuration: number;
+  fps: number;
+  accentColor: string;
+}> = ({ text, emphasisWords, localFrame, segmentDuration, fps, accentColor }) => {
+  const words = text.split(/\s+/);
+  const wordsPerFrame = words.length / segmentDuration;
+  const currentWordIdx = Math.min(
+    Math.floor(localFrame * wordsPerFrame),
+    words.length - 1
+  );
+
+  return (
+    <div
+      style={{
+        fontSize: 32,
+        lineHeight: 1.6,
+        color: "#ccc",
+        maxWidth: 1000,
+      }}
+    >
+      {words.map((word, i) => {
+        const isActive = i === currentWordIdx;
+        const isPast = i < currentWordIdx;
+        const isEmphasis = emphasisWords?.some(
+          (ew) => word.toLowerCase().includes(ew.toLowerCase())
+        );
+
+        let color = "#555"; // future word
+        if (isPast) color = "#999";
+        if (isActive) color = "#fff";
+        if (isEmphasis && (isActive || isPast)) color = accentColor;
+
+        return (
+          <span
+            key={i}
+            style={{
+              color,
+              fontWeight: isEmphasis ? 700 : isActive ? 600 : 400,
+              fontSize: isActive ? 34 : 32,
+              transition: "color 0.1s ease",
+              textShadow: isActive
+                ? `0 0 20px ${accentColor}40`
+                : "none",
+            }}
+          >
+            {word}{" "}
+          </span>
+        );
+      })}
+    </div>
+  );
+};
+
+// Visual hint background effects
+const VisualHintBackground: React.FC<{
+  visualHint: string;
+  frame: number;
+  segmentFrame: number;
+}> = ({ visualHint, frame, segmentFrame }) => {
+  const hintColor = VISUAL_HINT_COLORS[visualHint] || ACCENT_COLOR;
+
+  // Subtle animated background based on visual hint type
+  switch (visualHint) {
+    case "code_block":
+      return (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: `repeating-linear-gradient(
+              0deg,
+              transparent 0px,
+              transparent 30px,
+              rgba(167, 139, 250, 0.015) 30px,
+              rgba(167, 139, 250, 0.015) 31px
+            )`,
+            opacity: 0.5 + Math.sin(frame / 60) * 0.1,
+          }}
+        />
+      );
+
+    case "diagram":
+      return (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: `radial-gradient(circle at ${50 + Math.sin(frame / 120) * 10}% ${50 + Math.cos(frame / 100) * 10}%, ${hintColor}06 0%, transparent 50%)`,
+          }}
+        />
+      );
+
+    case "b-roll":
+      return (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: `linear-gradient(${frame * 0.2}deg, rgba(248, 113, 113, 0.02) 0%, transparent 50%, rgba(248, 113, 113, 0.01) 100%)`,
+          }}
+        />
+      );
+
+    default:
+      return null;
+  }
+};
+
+// Subtle audio visualizer
 const AudioVisualizer: React.FC<{ frame: number }> = ({ frame }) => {
   const barCount = 5;
   const bars = Array.from({ length: barCount }, (_, i) => {
-    // Each bar has a different phase for organic movement
     const phase = (i / barCount) * Math.PI * 2;
     const height = 20 + Math.sin(frame / 15 + phase) * 15;
-    const opacity = 0.15 + Math.sin(frame / 20 + phase) * 0.1;
+    const opacity = 0.12 + Math.sin(frame / 20 + phase) * 0.08;
 
     return (
       <div
@@ -432,7 +759,7 @@ const AudioVisualizer: React.FC<{ frame: number }> = ({ frame }) => {
         style={{
           width: 3,
           height: height,
-          backgroundColor: "#00d9ff",
+          backgroundColor: ACCENT_COLOR,
           borderRadius: 2,
           opacity: opacity,
         }}
@@ -444,13 +771,12 @@ const AudioVisualizer: React.FC<{ frame: number }> = ({ frame }) => {
     <div
       style={{
         position: "absolute",
-        bottom: 120,
-        left: "50%",
-        transform: "translateX(-50%)",
+        bottom: 100,
+        left: 80,
         display: "flex",
-        gap: 6,
+        gap: 5,
         alignItems: "flex-end",
-        height: 50,
+        height: 40,
       }}
     >
       {bars}

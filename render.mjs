@@ -233,6 +233,15 @@ async function main() {
   const langArg = process.argv.find((arg) => arg.startsWith("--lang="));
   const lang = langArg ? langArg.replace("--lang=", "") : "en"; // Default to English
 
+  // Validate language code
+  const SUPPORTED_LANGUAGES = ["en", "zh"];
+  if (!SUPPORTED_LANGUAGES.includes(lang)) {
+    console.error(
+      `${colors.red}❌ Unsupported language: "${lang}". Supported: ${SUPPORTED_LANGUAGES.join(", ")}${colors.reset}`
+    );
+    process.exit(1);
+  }
+
   if (!projectId) {
     console.log(`
 ${colors.cyan}YT-Factory Video Renderer${colors.reset}

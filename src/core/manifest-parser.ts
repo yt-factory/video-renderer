@@ -49,7 +49,21 @@ export const ShortsHookSchema = z.object({
   text: z.string().max(50),
   timestamp_start: z.string(),
   timestamp_end: z.string(),
-  hook_type: z.enum(['counter_intuitive', 'number_shock', 'controversy', 'quick_tip']),
+  hook_type: z.enum([
+    'counter_intuitive',
+    'number_shock',
+    'controversy',
+    'quick_tip',
+    'fomo',
+    'curiosity',
+    'awe',
+    'anger',
+    'validation',
+    'surprise',
+    'humor',
+    'empathy',
+    'urgency',
+  ]),
   emotional_trigger: EmotionalTriggerSchema,
   controversy_score: z.number().min(0).max(10),
   predicted_engagement: z.object({
@@ -126,7 +140,7 @@ export const SEODataSchema = z.object({
       z.object({
         name: z.string(),
         type: z.enum(['tool', 'concept', 'person', 'company', 'technology']),
-        description: z.string().max(100).optional(),
+        description: z.string().max(1000).optional(),
         wiki_link: z.string().url().optional(),
       })
     )
@@ -155,7 +169,7 @@ export const ProjectManifestSchema = z.object({
     word_count: z.number().positive(),
     estimated_reading_time_minutes: z.number().positive(),
   }),
-  content_engine: ContentEngineSchema,
+  content_engine: ContentEngineSchema.optional(),
   /** Monetization analysis from orchestrator (optional) */
   monetization: MonetizationInfoSchema.optional(),
   assets: z
