@@ -9,6 +9,9 @@ import {
   Sequence,
   spring,
 } from "remotion";
+import { selectTheme } from "../themes";
+import type { ThemeConfig } from "../themes/types";
+import { resolveSegmentComponent } from "../components/segments";
 
 // Render metadata for tracing
 export interface RenderMeta {
@@ -48,6 +51,13 @@ export interface Manifest {
       tags?: string[];
     };
     estimated_duration_seconds?: number;
+    media_preference?: {
+      visual?: {
+        mood?: string;
+        content_type?: string;
+        theme_suggestion?: string;
+      };
+    };
   };
   // Legacy fallback fields
   seo?: {
@@ -63,27 +73,10 @@ export interface MainVideoProps {
 }
 
 const BUFFER_FRAMES = 30; // 1 second buffer for fade in/out
-const ACCENT_COLOR = "#00d9ff";
-const BG_COLOR = "#0a0a0f";
 
-// Visual hint icon mapping
-const VISUAL_HINT_ICONS: Record<string, string> = {
-  code_block: "\u2318", // command key symbol
-  diagram: "\u25C6", // diamond
-  text_animation: "\u2726", // 4-pointed star
-  "b-roll": "\u25CE", // bullseye
-  screen_recording: "\u25A3", // square with fill
-  talking_head_placeholder: "\u263A", // smiley
-};
-
-const VISUAL_HINT_COLORS: Record<string, string> = {
-  code_block: "#a78bfa",
-  diagram: "#34d399",
-  text_animation: "#fbbf24",
-  "b-roll": "#f87171",
-  screen_recording: "#60a5fa",
-  talking_head_placeholder: "#fb923c",
-};
+// Fallback colors used when no theme is provided (e.g. preview placeholder)
+const FALLBACK_ACCENT = "#00d9ff";
+const FALLBACK_BG = "#0a0a0f";
 
 export const MainVideo: React.FC<MainVideoProps> = ({
   manifest,
@@ -114,8 +107,15 @@ export const MainVideo: React.FC<MainVideoProps> = ({
   const segments = manifest.content_engine?.script || [];
   const tags = manifest.content_engine?.seo?.tags || [];
 
+  const mediaPreference = manifest.content_engine?.media_preference;
+  const theme = selectTheme(
+    mediaPreference?.visual?.mood || "professional",
+    mediaPreference?.visual?.content_type || "tutorial",
+    mediaPreference?.visual?.theme_suggestion
+  );
+
   return (
-    <AbsoluteFill style={{ backgroundColor: BG_COLOR }}>
+    <AbsoluteFill style={{ backgroundColor: theme.colors.background }}>
       {/* Audio layer - plays during content (after buffer) */}
       {audioFile && (
         <Sequence from={BUFFER_FRAMES}>
@@ -136,6 +136,7 @@ export const MainVideo: React.FC<MainVideoProps> = ({
           segments={segments}
           tags={tags}
           contentDuration={contentDuration}
+          theme={theme}
         />
       </Sequence>
 
@@ -174,14 +175,14 @@ const PreviewPlaceholder: React.FC = () => {
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: BG_COLOR,
+        backgroundColor: FALLBACK_BG,
         justifyContent: "center",
         alignItems: "center",
         fontFamily: "system-ui, sans-serif",
       }}
     >
       <div style={{ textAlign: "center", opacity: breathing }}>
-        <h1 style={{ color: ACCENT_COLOR, fontSize: 72, margin: 0 }}>
+        <h1 style={{ color: FALLBACK_ACCENT, fontSize: 72, margin: 0 }}>
           {"\u6781\u5BA2\u7985"}
         </h1>
         <p style={{ color: "#666", fontSize: 28, marginTop: 20 }}>
@@ -280,7 +281,8 @@ const MainContent: React.FC<{
   segments: Segment[];
   tags: string[];
   contentDuration: number;
-}> = ({ title, lang, segments, tags, contentDuration }) => {
+  theme: ThemeConfig;
+}> = ({ title, lang, segments, tags, contentDuration, theme }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -306,8 +308,8 @@ const MainContent: React.FC<{
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: BG_COLOR,
-        fontFamily: "system-ui, -apple-system, sans-serif",
+        backgroundColor: theme.colors.background,
+        fontFamily: `${theme.fonts.body}, system-ui, -apple-system, sans-serif`,
       }}
     >
       {/* Ambient background gradient */}
@@ -318,19 +320,10 @@ const MainContent: React.FC<{
           left: 0,
           right: 0,
           bottom: 0,
-          background: `radial-gradient(ellipse at 50% 30%, rgba(0, 217, 255, 0.03) 0%, transparent 50%),
-                       radial-gradient(ellipse at 80% 80%, rgba(0, 255, 136, 0.02) 0%, transparent 40%)`,
+          background: `radial-gradient(ellipse at 50% 30%, ${theme.colors.primary}08 0%, transparent 50%),
+                       radial-gradient(ellipse at 80% 80%, ${theme.colors.secondary}06 0%, transparent 40%)`,
         }}
       />
-
-      {/* Visual hint background effect */}
-      {currentSegment && (
-        <VisualHintBackground
-          visualHint={currentSegment.visual_hint}
-          frame={frame}
-          segmentFrame={currentTiming ? frame - currentTiming.from : 0}
-        />
-      )}
 
       {/* Top brand bar */}
       <div
@@ -347,11 +340,12 @@ const MainContent: React.FC<{
       >
         <h1
           style={{
-            color: ACCENT_COLOR,
+            color: theme.colors.primary,
             fontSize: 36,
             fontWeight: 600,
             margin: 0,
-            textShadow: "0 0 20px rgba(0, 217, 255, 0.3)",
+            fontFamily: `${theme.fonts.heading}, system-ui, sans-serif`,
+            textShadow: `0 0 20px ${theme.colors.primary}4D`,
             letterSpacing: "0.05em",
           }}
         >
@@ -362,9 +356,9 @@ const MainContent: React.FC<{
         {segments.length > 0 && currentSegIdx >= 0 && (
           <div
             style={{
-              color: "#555",
+              color: theme.colors.muted,
               fontSize: 16,
-              fontFamily: "JetBrains Mono, Consolas, monospace",
+              fontFamily: `${theme.fonts.code}, JetBrains Mono, Consolas, monospace`,
             }}
           >
             {currentSegIdx + 1}/{segments.length}
@@ -384,7 +378,7 @@ const MainContent: React.FC<{
       >
         <p
           style={{
-            color: "#555",
+            color: theme.colors.muted,
             fontSize: 20,
             margin: 0,
             lineHeight: 1.4,
@@ -415,9 +409,10 @@ const MainContent: React.FC<{
             localFrame={frame - currentTiming.from}
             segmentDuration={currentTiming.duration}
             fps={fps}
+            theme={theme}
           />
         ) : segments.length === 0 ? (
-          <div style={{ color: "#444", fontSize: 24 }}>
+          <div style={{ color: theme.colors.muted, fontSize: 24 }}>
             {lang === "zh" ? "\u7B49\u5F85\u5185\u5BB9..." : "Awaiting content..."}
           </div>
         ) : null}
@@ -448,10 +443,10 @@ const MainContent: React.FC<{
               <span
                 key={i}
                 style={{
-                  color: "#666",
+                  color: theme.colors.muted,
                   fontSize: 12,
                   padding: "3px 10px",
-                  border: "1px solid #333",
+                  border: `1px solid ${theme.colors.muted}40`,
                   borderRadius: 12,
                 }}
               >
@@ -474,9 +469,9 @@ const MainContent: React.FC<{
             style={{
               width: `${progress * 100}%`,
               height: "100%",
-              backgroundColor: ACCENT_COLOR,
+              backgroundColor: theme.colors.primary,
               borderRadius: 2,
-              boxShadow: `0 0 8px rgba(0, 217, 255, 0.3)`,
+              boxShadow: `0 0 8px ${theme.colors.primary}4D`,
             }}
           />
         </div>
@@ -487,9 +482,9 @@ const MainContent: React.FC<{
             style={{
               textAlign: "right",
               marginTop: 8,
-              color: "#444",
+              color: theme.colors.muted,
               fontSize: 14,
-              fontFamily: "JetBrains Mono, Consolas, monospace",
+              fontFamily: `${theme.fonts.code}, JetBrains Mono, Consolas, monospace`,
             }}
           >
             {currentSegment.timestamp}
@@ -498,19 +493,20 @@ const MainContent: React.FC<{
       </div>
 
       {/* Audio visualizer */}
-      <AudioVisualizer frame={frame} />
+      <AudioVisualizer frame={frame} accentColor={theme.colors.primary} />
     </AbsoluteFill>
   );
 };
 
-// Segment renderer - displays content based on visual_hint
+// Segment renderer - displays content based on visual_hint using resolved component
 const SegmentRenderer: React.FC<{
   segment: Segment;
   segmentIndex: number;
   localFrame: number;
   segmentDuration: number;
   fps: number;
-}> = ({ segment, segmentIndex, localFrame, segmentDuration, fps }) => {
+  theme: ThemeConfig;
+}> = ({ segment, localFrame, segmentDuration, fps, theme }) => {
   // Entrance animation
   const enterProgress = spring({
     frame: localFrame,
@@ -527,10 +523,7 @@ const SegmentRenderer: React.FC<{
         })
       : 1;
 
-  const hintColor =
-    VISUAL_HINT_COLORS[segment.visual_hint] || ACCENT_COLOR;
-  const hintIcon =
-    VISUAL_HINT_ICONS[segment.visual_hint] || "\u2726";
+  const SegmentComponent = resolveSegmentComponent(segment.visual_hint);
 
   return (
     <div
@@ -541,212 +534,23 @@ const SegmentRenderer: React.FC<{
         transform: `translateY(${interpolate(enterProgress, [0, 1], [20, 0])}px)`,
       }}
     >
-      {/* Visual hint badge */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 24,
-        }}
-      >
-        <span
-          style={{
-            color: hintColor,
-            fontSize: 20,
-            width: 36,
-            height: 36,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            border: `1px solid ${hintColor}40`,
-            borderRadius: 8,
-            backgroundColor: `${hintColor}10`,
-          }}
-        >
-          {hintIcon}
-        </span>
-        <span
-          style={{
-            color: hintColor,
-            fontSize: 14,
-            textTransform: "uppercase",
-            letterSpacing: "0.1em",
-            fontWeight: 600,
-          }}
-        >
-          {segment.visual_hint.replace(/[-_]/g, " ")}
-        </span>
-
-        {/* Emotional trigger indicator */}
-        {segment.emotional_trigger && (
-          <span
-            style={{
-              color: "#888",
-              fontSize: 12,
-              padding: "2px 8px",
-              border: "1px solid #444",
-              borderRadius: 10,
-              marginLeft: "auto",
-            }}
-          >
-            {segment.emotional_trigger}
-          </span>
-        )}
-      </div>
-
-      {/* Voiceover text - the main content */}
-      <VoiceoverDisplay
-        text={segment.voiceover}
-        emphasisWords={segment.emphasis_words}
+      <SegmentComponent
+        voiceover={segment.voiceover}
+        theme={theme}
         localFrame={localFrame}
         segmentDuration={segmentDuration}
         fps={fps}
-        accentColor={hintColor}
+        emphasisWords={segment.emphasis_words}
       />
-
-      {/* Timestamp */}
-      <div
-        style={{
-          marginTop: 30,
-          color: "#333",
-          fontSize: 16,
-          fontFamily: "JetBrains Mono, Consolas, monospace",
-        }}
-      >
-        [{segment.timestamp}]{" "}
-        <span style={{ color: "#444" }}>
-          ~{segment.estimated_duration_seconds}s
-        </span>
-      </div>
     </div>
   );
-};
-
-// Voiceover text display with word-level animation
-const VoiceoverDisplay: React.FC<{
-  text: string;
-  emphasisWords?: string[];
-  localFrame: number;
-  segmentDuration: number;
-  fps: number;
-  accentColor: string;
-}> = ({ text, emphasisWords, localFrame, segmentDuration, fps, accentColor }) => {
-  const words = text.split(/\s+/);
-  const wordsPerFrame = words.length / segmentDuration;
-  const currentWordIdx = Math.min(
-    Math.floor(localFrame * wordsPerFrame),
-    words.length - 1
-  );
-
-  return (
-    <div
-      style={{
-        fontSize: 32,
-        lineHeight: 1.6,
-        color: "#ccc",
-        maxWidth: 1000,
-      }}
-    >
-      {words.map((word, i) => {
-        const isActive = i === currentWordIdx;
-        const isPast = i < currentWordIdx;
-        const isEmphasis = emphasisWords?.some(
-          (ew) => word.toLowerCase().includes(ew.toLowerCase())
-        );
-
-        let color = "#555"; // future word
-        if (isPast) color = "#999";
-        if (isActive) color = "#fff";
-        if (isEmphasis && (isActive || isPast)) color = accentColor;
-
-        return (
-          <span
-            key={i}
-            style={{
-              color,
-              fontWeight: isEmphasis ? 700 : isActive ? 600 : 400,
-              fontSize: isActive ? 34 : 32,
-              transition: "color 0.1s ease",
-              textShadow: isActive
-                ? `0 0 20px ${accentColor}40`
-                : "none",
-            }}
-          >
-            {word}{" "}
-          </span>
-        );
-      })}
-    </div>
-  );
-};
-
-// Visual hint background effects
-const VisualHintBackground: React.FC<{
-  visualHint: string;
-  frame: number;
-  segmentFrame: number;
-}> = ({ visualHint, frame, segmentFrame }) => {
-  const hintColor = VISUAL_HINT_COLORS[visualHint] || ACCENT_COLOR;
-
-  // Subtle animated background based on visual hint type
-  switch (visualHint) {
-    case "code_block":
-      return (
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: `repeating-linear-gradient(
-              0deg,
-              transparent 0px,
-              transparent 30px,
-              rgba(167, 139, 250, 0.015) 30px,
-              rgba(167, 139, 250, 0.015) 31px
-            )`,
-            opacity: 0.5 + Math.sin(frame / 60) * 0.1,
-          }}
-        />
-      );
-
-    case "diagram":
-      return (
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: `radial-gradient(circle at ${50 + Math.sin(frame / 120) * 10}% ${50 + Math.cos(frame / 100) * 10}%, ${hintColor}06 0%, transparent 50%)`,
-          }}
-        />
-      );
-
-    case "b-roll":
-      return (
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: `linear-gradient(${frame * 0.2}deg, rgba(248, 113, 113, 0.02) 0%, transparent 50%, rgba(248, 113, 113, 0.01) 100%)`,
-          }}
-        />
-      );
-
-    default:
-      return null;
-  }
 };
 
 // Subtle audio visualizer
-const AudioVisualizer: React.FC<{ frame: number }> = ({ frame }) => {
+const AudioVisualizer: React.FC<{ frame: number; accentColor: string }> = ({
+  frame,
+  accentColor,
+}) => {
   const barCount = 5;
   const bars = Array.from({ length: barCount }, (_, i) => {
     const phase = (i / barCount) * Math.PI * 2;
@@ -759,7 +563,7 @@ const AudioVisualizer: React.FC<{ frame: number }> = ({ frame }) => {
         style={{
           width: 3,
           height: height,
-          backgroundColor: ACCENT_COLOR,
+          backgroundColor: accentColor,
           borderRadius: 2,
           opacity: opacity,
         }}
