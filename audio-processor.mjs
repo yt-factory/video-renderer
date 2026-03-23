@@ -128,6 +128,77 @@ function validateAudioFile(audioPath) {
 // =============================================================================
 
 /**
+ * Extract loudnorm result fields from a parsed JSON object.
+ * Returns null if any required field is missing or not a finite number.
+ */
+function extractLoudnormResult(data) {
+  const REQUIRED_KEYS = [
+    "input_i", "input_tp", "input_lra", "input_thresh", "target_offset",
+    "output_i", "output_tp", "output_lra", "output_thresh",
+  ];
+
+  const result = { error: null };
+  for (const key of REQUIRED_KEYS) {
+    const val = parseFloat(data[key]);
+    if (!isFinite(val)) return null;
+    result[key] = val;
+  }
+  return result;
+}
+
+/**
+ * Try to parse loudnorm JSON from ffmpeg output text.
+ *
+ * Strategy 1: regex for the last JSON object containing "input_i".
+ * Strategy 2: line-by-line scan for key=value or "key" : "value" pairs.
+ *
+ * Returns the parsed result object or null on failure.
+ */
+function parseLoudnormOutput(text) {
+  if (!text) return null;
+
+  // --- Strategy 1: Find the last JSON block that contains "input_i" ---
+  // Collect all top-level {...} matches, pick the one with "input_i"
+  const jsonBlocks = [];
+  const blockRegex = /\{[^{}]*\}/gs;
+  let m;
+  while ((m = blockRegex.exec(text)) !== null) {
+    if (m[0].includes("input_i")) {
+      jsonBlocks.push(m[0]);
+    }
+  }
+
+  // Try the last matching block first (most likely the real output)
+  for (let i = jsonBlocks.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(jsonBlocks[i]);
+      const result = extractLoudnormResult(parsed);
+      if (result) return result;
+    } catch {
+      // Malformed JSON, try next candidate
+    }
+  }
+
+  // --- Strategy 2: Line-by-line key:value / key=value scan ---
+  const kvMap = {};
+  const lines = text.split("\n");
+  for (const line of lines) {
+    // Match patterns like:  "input_i" : "-24.2"  or  input_i=-24.2
+    const jsonKv = line.match(/"?(input_i|input_tp|input_lra|input_thresh|target_offset|output_i|output_tp|output_lra|output_thresh)"?\s*[:=]\s*"?(-?[\d.]+)"?/);
+    if (jsonKv) {
+      kvMap[jsonKv[1]] = jsonKv[2];
+    }
+  }
+
+  if (Object.keys(kvMap).length >= 5) {
+    const result = extractLoudnormResult(kvMap);
+    if (result) return result;
+  }
+
+  return null;
+}
+
+/**
  * Analyze loudness using ffmpeg loudnorm filter (first pass).
  * Returns integrated loudness, true peak, loudness range, and threshold.
  */
@@ -138,51 +209,26 @@ function analyzeLoudness(audioPath) {
       { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], maxBuffer: 10 * 1024 * 1024 }
     );
 
-    // The loudnorm JSON is embedded in ffmpeg's stderr output.
-    // Extract the JSON block between the last { and }
-    const jsonMatch = output.match(/\{[^{}]*"input_i"[^{}]*\}/s);
-    if (!jsonMatch) {
-      return { error: "Could not parse loudnorm JSON from ffmpeg output" };
-    }
+    const result = parseLoudnormOutput(output);
+    if (result) return result;
 
-    const loudnormData = JSON.parse(jsonMatch[0]);
     return {
-      input_i: parseFloat(loudnormData.input_i),
-      input_tp: parseFloat(loudnormData.input_tp),
-      input_lra: parseFloat(loudnormData.input_lra),
-      input_thresh: parseFloat(loudnormData.input_thresh),
-      target_offset: parseFloat(loudnormData.target_offset),
-      output_i: parseFloat(loudnormData.output_i),
-      output_tp: parseFloat(loudnormData.output_tp),
-      output_lra: parseFloat(loudnormData.output_lra),
-      output_thresh: parseFloat(loudnormData.output_thresh),
-      error: null,
+      error: "Could not parse loudnorm JSON from ffmpeg output. "
+        + "Expected a JSON block with 'input_i' key. "
+        + "Raw output tail: " + (output || "").slice(-300),
     };
   } catch (error) {
     // ffmpeg writes to stderr, so execSync may throw even on success.
     // Try to parse stdout/stderr from the error object.
     const combinedOutput = (error.stdout || "") + (error.stderr || "");
-    const jsonMatch = combinedOutput.match(/\{[^{}]*"input_i"[^{}]*\}/s);
-    if (jsonMatch) {
-      try {
-        const loudnormData = JSON.parse(jsonMatch[0]);
-        return {
-          input_i: parseFloat(loudnormData.input_i),
-          input_tp: parseFloat(loudnormData.input_tp),
-          input_lra: parseFloat(loudnormData.input_lra),
-          input_thresh: parseFloat(loudnormData.input_thresh),
-          target_offset: parseFloat(loudnormData.target_offset),
-          output_i: parseFloat(loudnormData.output_i),
-          output_tp: parseFloat(loudnormData.output_tp),
-          output_lra: parseFloat(loudnormData.output_lra),
-          output_thresh: parseFloat(loudnormData.output_thresh),
-          error: null,
-        };
-      } catch {
-        // Fall through to error return
-      }
-    }
-    return { error: `Loudness analysis failed: ${error.message}` };
+    const result = parseLoudnormOutput(combinedOutput);
+    if (result) return result;
+
+    return {
+      error: `Loudness analysis failed: ${error.message}. `
+        + "Could not find loudnorm JSON in ffmpeg output. "
+        + "Ensure ffmpeg is installed and the audio file is valid.",
+    };
   }
 }
 

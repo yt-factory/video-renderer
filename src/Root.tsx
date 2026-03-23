@@ -1,6 +1,7 @@
 import React from "react";
 import { Composition } from "remotion";
 import { MainVideo, MainVideoProps } from "./compositions/MainVideo";
+import { ShortsVideo } from "./compositions/ShortsVideo";
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -26,7 +27,7 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="ShortsVideo"
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        component={MainVideo as any}
+        component={ShortsVideo as any}
         durationInFrames={30 * 60} // Default 60 seconds
         fps={30}
         width={1080}
