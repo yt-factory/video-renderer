@@ -290,11 +290,19 @@ Options:
     process.exit(1);
   }
 
-  // Audio path - support en.mp3 or zh.mp3
-  const audioPath = path.join(projectDir, `audio/${lang}.mp3`);
+  // Prefer processed audio, fall back to raw
+  const processedAudioPath = path.join(projectDir, `audio/${lang}.processed.mp3`);
+  const rawAudioPath = path.join(projectDir, `audio/${lang}.mp3`);
+  const audioPath = fs.existsSync(processedAudioPath) ? processedAudioPath : rawAudioPath;
+
+  if (audioPath === processedAudioPath) {
+    log("✓", "Using processed audio", processedAudioPath);
+  } else {
+    log("⚠️", "Using raw audio (run audio-processor.mjs first for best quality)", rawAudioPath);
+  }
 
   if (!fs.existsSync(audioPath)) {
-    console.error(`${colors.red}❌ Audio not found: ${audioPath}${colors.reset}`);
+    console.error(`${colors.red}❌ Audio not found: ${rawAudioPath}${colors.reset}`);
     console.log("");
     console.log(`${colors.yellow}📋 Please complete these steps first:${colors.reset}`);
     console.log(
@@ -302,13 +310,14 @@ Options:
     );
     console.log("   2. Copy content to NotebookLM");
     console.log("   3. Generate Audio Overview");
-    console.log(`   4. Download MP3 and save as ${colors.cyan}${audioPath}${colors.reset}`);
+    console.log(`   4. Download MP3 and save as ${colors.cyan}${rawAudioPath}${colors.reset}`);
     console.log("");
     console.log(`${colors.dim}Directory structure should be:${colors.reset}`);
     console.log(`   ${projectDir}/`);
     console.log(`   ├── manifest.json`);
     console.log(`   ├── audio/`);
     console.log(`   │   ├── en.mp3`);
+    console.log(`   │   ├── en.processed.mp3  ${colors.dim}(optional, from audio-processor.mjs)${colors.reset}`);
     console.log(`   │   └── zh.mp3`);
     console.log(`   └── notebooklm_script_${lang}.md`);
     process.exit(1);
