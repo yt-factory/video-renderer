@@ -91,7 +91,7 @@ export const MainVideo: React.FC<MainVideoProps> = ({
     return <PreviewPlaceholder />;
   }
 
-  const contentDuration = durationInFrames - BUFFER_FRAMES * 2;
+  const contentDuration = Math.max(1, durationInFrames - BUFFER_FRAMES * 2);
 
   // Get title for the specified language
   const regionalSeo = manifest.content_engine?.seo?.regional_seo || [];
@@ -261,7 +261,7 @@ function calculateSegmentFrames(
 
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
-    const proportion = seg.estimated_duration_seconds / totalDuration;
+    const proportion = totalDuration > 0 ? seg.estimated_duration_seconds / totalDuration : 1 / segments.length;
     const segFrames =
       i === segments.length - 1
         ? totalFrames - currentFrame // Last segment gets remaining frames
