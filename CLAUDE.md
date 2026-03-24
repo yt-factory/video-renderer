@@ -3,6 +3,50 @@
 
 ---
 
+## Recent Changes (March 2026)
+
+### Theme System + Visual Segment Components (Phase 3)
+
+| File | Purpose |
+|------|---------|
+| `src/themes/types.ts` | ThemeConfig + SegmentStyle interfaces |
+| `src/themes/index.ts` | 5 themes (cyberpunk, minimalist, dark_mode, whiteboard, corporate) + selectTheme() |
+| `src/components/segments/CodeBlockSegment.tsx` | Terminal window with typing animation |
+| `src/components/segments/DiagramSegment.tsx` | Animated node-edge graph |
+| `src/components/segments/TextAnimationSegment.tsx` | Kinetic typography with emphasis words |
+| `src/components/segments/BRollSegment.tsx` | Ambient gradient with caption overlay |
+| `src/components/segments/ScreenRecordingSegment.tsx` | Monitor bezel with bullet points |
+| `src/components/segments/TalkingHeadSegment.tsx` | Avatar silhouette with audio waveform |
+| `src/components/segments/index.ts` | resolveSegmentComponent() barrel export |
+| `src/compositions/ShortsVideo.tsx` | Dedicated 9:16 Shorts composition with safe zone margins |
+
+### Audio Processing Pipeline (Phase 4)
+
+| File | Purpose |
+|------|---------|
+| `audio-processor.mjs` | Two-pass loudness normalization (-14 LUFS), silence trimming, quality report |
+| `pipeline.mjs` | Unified command: audio processing + video rendering in one step |
+
+### Key Integration Points
+
+- `MainVideo.tsx` selects theme from `manifest.content_engine.media_preference` via `selectTheme(mood, contentType)`
+- `SegmentRenderer` uses `resolveSegmentComponent(visual_hint)` to pick the right visual for each segment
+- All segment components receive `theme: ThemeConfig` and apply theme colors/fonts
+- `render.mjs` prefers `audio/{lang}.processed.mp3` over raw audio, falls back gracefully
+- `pipeline.mjs` chains `audio-processor.mjs` + `render.mjs`, skips processing if already done
+
+### CLI Commands
+
+```bash
+node pipeline.mjs <project-id> --lang=en                # Full pipeline
+node pipeline.mjs <project-id> --all-langs               # Both en and zh
+node pipeline.mjs <project-id> --profile=production       # High quality
+node audio-processor.mjs <project-id> --lang=en           # Audio only
+node render.mjs <project-id> --lang=en                    # Render only
+```
+
+---
+
 ## 🎯 Role Definition
 
 你是一名资深的 **React Video Engineer & Motion Graphics Specialist**。
