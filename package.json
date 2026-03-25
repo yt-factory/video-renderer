@@ -16,6 +16,7 @@
     "pipeline": "node pipeline.mjs",
     "pipeline:draft": "RENDER_PROFILE=draft node pipeline.mjs",
     "pipeline:prod": "RENDER_PROFILE=production node pipeline.mjs",
+    "prepare-upload": "node prepare-upload.mjs",
     "docker:build": "docker build -t video-renderer ./docker",
     "docker:render": "docker run -v $(pwd):/workspace video-renderer"
   },
