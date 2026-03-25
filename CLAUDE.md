@@ -35,7 +35,19 @@
 - `render.mjs` prefers `audio/{lang}.processed.mp3` over raw audio, falls back gracefully
 - `pipeline.mjs` chains `audio-processor.mjs` + `render.mjs`, skips processing if already done
 
-### CLI Commands
+### NotebookLM Workflow (Primary)
+
+For NotebookLM Cinematic video content, use `prepare-upload.mjs` instead of the custom render pipeline. NotebookLM's native Cinematic video generation produces superior visuals for podcast-style content.
+
+```bash
+node prepare-upload.mjs <project-id> <video-file> [--lang=zh]  # Pair video with SEO metadata
+```
+
+Output: `video.mp4` + `upload-metadata.json` + `upload-metadata.txt` in output dir.
+
+### Custom Render CLI Commands (Alternative)
+
+For non-NotebookLM content or custom branding needs:
 
 ```bash
 node pipeline.mjs <project-id> --lang=en                # Full pipeline
