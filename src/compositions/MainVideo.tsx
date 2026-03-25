@@ -74,6 +74,16 @@ export interface MainVideoProps {
 
 const BUFFER_FRAMES = 30; // 1 second buffer for fade in/out
 
+/**
+ * Detect if text is likely English based on ASCII letter ratio.
+ * Used to suppress English voiceover text when rendering non-English videos.
+ */
+function isLikelyEnglish(text: string): boolean {
+  if (text.length === 0) return false;
+  const asciiChars = text.replace(/[^a-zA-Z]/g, "").length;
+  return asciiChars / text.length > 0.7;
+}
+
 // Fallback colors used when no theme is provided (e.g. preview placeholder)
 const FALLBACK_ACCENT = "#00d9ff";
 const FALLBACK_BG = "#0a0a0f";
@@ -410,6 +420,7 @@ const MainContent: React.FC<{
             segmentDuration={currentTiming.duration}
             fps={fps}
             theme={theme}
+            lang={lang}
           />
         ) : segments.length === 0 ? (
           <div style={{ color: theme.colors.muted, fontSize: 24 }}>
@@ -506,7 +517,8 @@ const SegmentRenderer: React.FC<{
   segmentDuration: number;
   fps: number;
   theme: ThemeConfig;
-}> = ({ segment, localFrame, segmentDuration, fps, theme }) => {
+  lang: string;
+}> = ({ segment, localFrame, segmentDuration, fps, theme, lang }) => {
   // Entrance animation
   const enterProgress = spring({
     frame: localFrame,
@@ -525,6 +537,12 @@ const SegmentRenderer: React.FC<{
 
   const SegmentComponent = resolveSegmentComponent(segment.visual_hint);
 
+  // Suppress English voiceover text when rendering non-English videos
+  const displayVoiceover =
+    lang !== "en" && isLikelyEnglish(segment.voiceover)
+      ? ""
+      : segment.voiceover;
+
   return (
     <div
       style={{
@@ -535,7 +553,7 @@ const SegmentRenderer: React.FC<{
       }}
     >
       <SegmentComponent
-        voiceover={segment.voiceover}
+        voiceover={displayVoiceover}
         theme={theme}
         localFrame={localFrame}
         segmentDuration={segmentDuration}

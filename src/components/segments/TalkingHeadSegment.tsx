@@ -80,8 +80,8 @@ export const TalkingHeadSegment: React.FC<TalkingHeadSegmentProps> = ({
             width: 148,
             height: 148,
             borderRadius: "50%",
-            border: `2px solid ${segmentStyle.accentColor}60`,
-            boxShadow: `0 0 ${glowIntensity}px ${segmentStyle.accentColor}40`,
+            border: `2px solid ${segmentStyle.accentColor}80`,
+            boxShadow: `0 0 ${glowIntensity}px ${segmentStyle.accentColor}60`,
           }}
         />
 
@@ -106,7 +106,7 @@ export const TalkingHeadSegment: React.FC<TalkingHeadSegmentProps> = ({
                 width: 44,
                 height: 44,
                 borderRadius: "50%",
-                background: segmentStyle.accentColor + "30",
+                background: segmentStyle.accentColor + "50",
                 margin: "0 auto",
               }}
             />
@@ -116,7 +116,7 @@ export const TalkingHeadSegment: React.FC<TalkingHeadSegmentProps> = ({
                 width: 80,
                 height: 48,
                 borderRadius: "50% 50% 0 0",
-                background: segmentStyle.accentColor + "20",
+                background: segmentStyle.accentColor + "40",
                 marginTop: 8,
               }}
             />
@@ -169,7 +169,7 @@ export const TalkingHeadSegment: React.FC<TalkingHeadSegmentProps> = ({
           style={{
             fontFamily: theme.fonts.body,
             fontSize: 24,
-            color: "rgba(255, 255, 255, 0.85)",
+            color: theme.colors.text,
             lineHeight: 1.5,
             margin: 0,
             textShadow: "0 2px 4px rgba(0, 0, 0, 0.3)",
